@@ -4,15 +4,22 @@ import TerrainMap from './TerrainMap';
 
 function App() {
   const [connected, setConnected] = useState(false);
-  const [uavState, setUavState] = useState({
-    position: { x: 0, y: 0, z: 0 },
-    velocity: { x: 0, y: 0, z: 0 },
-    orientation: { pitch: 0, roll: 0, yaw: 0 },
-    battery: 100,
-    status: 'idle',
-    armed: false
+  const [uavs, setUavs] = useState({
+    'UAV-1': {
+      id: 'UAV-1',
+      position: { x: 0, y: 0, z: 0 },
+      velocity: { x: 0, y: 0, z: 0 },
+      orientation: { pitch: 0, roll: 0, yaw: 0 },
+      battery: 100,
+      status: 'idle',
+      armed: false,
+      color: '#00bfff'
+    }
   });
+  const [selectedUavId, setSelectedUavId] = useState('UAV-1');
   const [logs, setLogs] = useState([]);
+  const [showControls, setShowControls] = useState(false);
+  const [showLogs, setShowLogs] = useState(false);
   const wsRef = useRef(null);
 
   useEffect(() => {
@@ -37,9 +44,16 @@ function App() {
     ws.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data);
-        
+
         if (data.type === 'state_update') {
-          setUavState(data.data);
+          // Update the simulator UAV state
+          setUavs(prev => ({
+            ...prev,
+            'UAV-1': {
+              ...prev['UAV-1'],
+              ...data.data
+            }
+          }));
         } else if (data.type === 'command_response') {
           addLog(`Command ${data.command}: ${data.message}`);
         } else if (data.type === 'error') {
@@ -59,7 +73,7 @@ function App() {
       console.log('Disconnected from backend');
       setConnected(false);
       addLog('Disconnected from backend server');
-      
+
       // Attempt to reconnect after 3 seconds
       setTimeout(connectWebSocket, 3000);
     };
@@ -86,21 +100,12 @@ function App() {
     }
   };
 
-  const handleArm = () => {
-    sendCommand('arm');
-  };
+  const selectedUav = uavs[selectedUavId];
 
-  const handleDisarm = () => {
-    sendCommand('disarm');
-  };
-
-  const handleTakeoff = () => {
-    sendCommand('takeoff', { altitude: 10 });
-  };
-
-  const handleLand = () => {
-    sendCommand('land');
-  };
+  const handleArm = () => sendCommand('arm');
+  const handleDisarm = () => sendCommand('disarm');
+  const handleTakeoff = () => sendCommand('takeoff', { altitude: 10 });
+  const handleLand = () => sendCommand('land');
 
   const handleMove = (direction) => {
     const moveParams = {
@@ -121,91 +126,79 @@ function App() {
 
   return (
     <div className="App">
-      <header className="App-header">
+      <TerrainMap
+        uavs={uavs}
+        selectedUavId={selectedUavId}
+        onSelectUav={setSelectedUavId}
+      />
+
+      {/* Top bar with connection status */}
+      <div className="top-bar">
         <h1>UAV Control System</h1>
         <div className={`connection-status ${connected ? 'connected' : 'disconnected'}`}>
           {connected ? '● Connected' : '○ Disconnected'}
         </div>
-      </header>
+      </div>
 
-      <div className="main-container">
-        <div className="left-panel">
-          <div className="terrain-section">
-            <TerrainMap uavState={uavState} />
+      {/* Floating control buttons */}
+      <div className="floating-buttons">
+        <button
+          className={`toggle-btn ${showControls ? 'active' : ''}`}
+          onClick={() => setShowControls(!showControls)}
+        >
+          Controls
+        </button>
+        <button
+          className={`toggle-btn ${showLogs ? 'active' : ''}`}
+          onClick={() => setShowLogs(!showLogs)}
+        >
+          Logs
+        </button>
+      </div>
+
+      {/* Collapsible Controls Panel */}
+      {showControls && (
+        <div className="overlay-panel controls-panel">
+          <div className="panel-header">
+            <h2>Flight Controls - {selectedUav.id}</h2>
+            <button className="close-btn" onClick={() => setShowControls(false)}>✕</button>
           </div>
 
-          <div className="telemetry-section">
-            <h2>Telemetry Data</h2>
-            <div className="telemetry-grid">
-              <div className="telemetry-item">
-                <label>Status:</label>
-                <span className={`status-${uavState.status}`}>{uavState.status}</span>
+          <div className="panel-content">
+            {/* Telemetry */}
+            <div className="telemetry-compact">
+              <div className="telemetry-row">
+                <span className="label">Status:</span>
+                <span className={`value status-${selectedUav.status}`}>{selectedUav.status}</span>
               </div>
-              <div className="telemetry-item">
-                <label>Armed:</label>
-                <span>{uavState.armed ? 'YES' : 'NO'}</span>
+              <div className="telemetry-row">
+                <span className="label">Battery:</span>
+                <span className="value">{selectedUav.battery}%</span>
               </div>
-              <div className="telemetry-item">
-                <label>Battery:</label>
-                <span>{uavState.battery}%</span>
+              <div className="telemetry-row">
+                <span className="label">Altitude:</span>
+                <span className="value">{selectedUav.position.z.toFixed(1)}m</span>
               </div>
-              <div className="telemetry-item">
-                <label>Altitude:</label>
-                <span>{uavState.position.z.toFixed(2)} m</span>
-              </div>
-              <div className="telemetry-item">
-                <label>Position X:</label>
-                <span>{uavState.position.x.toFixed(2)} m</span>
-              </div>
-              <div className="telemetry-item">
-                <label>Position Y:</label>
-                <span>{uavState.position.y.toFixed(2)} m</span>
-              </div>
-              <div className="telemetry-item">
-                <label>Velocity:</label>
-                <span>{Math.sqrt(
-                  uavState.velocity.x ** 2 + 
-                  uavState.velocity.y ** 2 + 
-                  uavState.velocity.z ** 2
-                ).toFixed(2)} m/s</span>
-              </div>
-              <div className="telemetry-item">
-                <label>Yaw:</label>
-                <span>{uavState.orientation.yaw.toFixed(1)}°</span>
+              <div className="telemetry-row">
+                <span className="label">Armed:</span>
+                <span className="value">{selectedUav.armed ? 'YES' : 'NO'}</span>
               </div>
             </div>
-          </div>
 
-          <div className="logs-section">
-            <h2>System Logs</h2>
-            <div className="logs-container">
-              {logs.map((log, index) => (
-                <div key={index} className={`log-entry log-${log.type}`}>
-                  <span className="log-timestamp">{log.timestamp}</span>
-                  <span className="log-message">{log.message}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-
-        <div className="right-panel">
-          <div className="control-section">
-            <h2>Flight Controls</h2>
-            
+            {/* Control Groups */}
             <div className="control-group">
               <h3>System</h3>
               <div className="button-row">
-                <button 
-                  onClick={handleArm} 
-                  disabled={!connected || uavState.armed}
+                <button
+                  onClick={handleArm}
+                  disabled={!connected || selectedUav.armed}
                   className="btn btn-warning"
                 >
                   ARM
                 </button>
-                <button 
-                  onClick={handleDisarm} 
-                  disabled={!connected || !uavState.armed}
+                <button
+                  onClick={handleDisarm}
+                  disabled={!connected || !selectedUav.armed}
                   className="btn btn-danger"
                 >
                   DISARM
@@ -216,16 +209,16 @@ function App() {
             <div className="control-group">
               <h3>Flight Mode</h3>
               <div className="button-row">
-                <button 
-                  onClick={handleTakeoff} 
-                  disabled={!connected || !uavState.armed || uavState.status === 'flying'}
+                <button
+                  onClick={handleTakeoff}
+                  disabled={!connected || !selectedUav.armed || selectedUav.status === 'flying'}
                   className="btn btn-success"
                 >
                   TAKEOFF
                 </button>
-                <button 
-                  onClick={handleLand} 
-                  disabled={!connected || uavState.status !== 'flying'}
+                <button
+                  onClick={handleLand}
+                  disabled={!connected || selectedUav.status !== 'flying'}
                   className="btn btn-primary"
                 >
                   LAND
@@ -237,53 +230,53 @@ function App() {
               <h3>Movement</h3>
               <div className="movement-grid">
                 <div className="movement-row">
-                  <button 
-                    onClick={() => handleMove('up')} 
-                    disabled={!connected || uavState.status !== 'flying'}
+                  <button
+                    onClick={() => handleMove('up')}
+                    disabled={!connected || selectedUav.status !== 'flying'}
                     className="btn btn-control"
                   >
-                    ⬆️ UP
+                    ⬆ UP
                   </button>
                 </div>
                 <div className="movement-row">
-                  <button 
-                    onClick={() => handleMove('forward')} 
-                    disabled={!connected || uavState.status !== 'flying'}
+                  <button
+                    onClick={() => handleMove('forward')}
+                    disabled={!connected || selectedUav.status !== 'flying'}
                     className="btn btn-control"
                   >
-                    ⬆️ FWD
+                    ⬆ FWD
                   </button>
                 </div>
                 <div className="movement-row">
-                  <button 
-                    onClick={() => handleMove('left')} 
-                    disabled={!connected || uavState.status !== 'flying'}
+                  <button
+                    onClick={() => handleMove('left')}
+                    disabled={!connected || selectedUav.status !== 'flying'}
                     className="btn btn-control"
                   >
-                    ⬅️ LEFT
+                    ⬅ LEFT
                   </button>
-                  <button 
-                    onClick={() => handleMove('down')} 
-                    disabled={!connected || uavState.status !== 'flying'}
+                  <button
+                    onClick={() => handleMove('down')}
+                    disabled={!connected || selectedUav.status !== 'flying'}
                     className="btn btn-control"
                   >
-                    ⬇️ DOWN
+                    ⬇ DOWN
                   </button>
-                  <button 
-                    onClick={() => handleMove('right')} 
-                    disabled={!connected || uavState.status !== 'flying'}
+                  <button
+                    onClick={() => handleMove('right')}
+                    disabled={!connected || selectedUav.status !== 'flying'}
                     className="btn btn-control"
                   >
-                    ➡️ RIGHT
+                    ➡ RIGHT
                   </button>
                 </div>
                 <div className="movement-row">
-                  <button 
-                    onClick={() => handleMove('backward')} 
-                    disabled={!connected || uavState.status !== 'flying'}
+                  <button
+                    onClick={() => handleMove('backward')}
+                    disabled={!connected || selectedUav.status !== 'flying'}
                     className="btn btn-control"
                   >
-                    ⬇️ BACK
+                    ⬇ BACK
                   </button>
                 </div>
               </div>
@@ -292,16 +285,16 @@ function App() {
             <div className="control-group">
               <h3>Rotation</h3>
               <div className="button-row">
-                <button 
-                  onClick={() => handleRotate('ccw')} 
-                  disabled={!connected || uavState.status !== 'flying'}
+                <button
+                  onClick={() => handleRotate('ccw')}
+                  disabled={!connected || selectedUav.status !== 'flying'}
                   className="btn btn-control"
                 >
                   ↺ CCW
                 </button>
-                <button 
-                  onClick={() => handleRotate('cw')} 
-                  disabled={!connected || uavState.status !== 'flying'}
+                <button
+                  onClick={() => handleRotate('cw')}
+                  disabled={!connected || selectedUav.status !== 'flying'}
                   className="btn btn-control"
                 >
                   ↻ CW
@@ -310,7 +303,27 @@ function App() {
             </div>
           </div>
         </div>
-      </div>
+      )}
+
+      {/* Collapsible Logs Panel */}
+      {showLogs && (
+        <div className="overlay-panel logs-panel">
+          <div className="panel-header">
+            <h2>System Logs</h2>
+            <button className="close-btn" onClick={() => setShowLogs(false)}>✕</button>
+          </div>
+          <div className="panel-content">
+            <div className="logs-container">
+              {logs.map((log, index) => (
+                <div key={index} className={`log-entry log-${log.type}`}>
+                  <span className="log-timestamp">{log.timestamp}</span>
+                  <span className="log-message">{log.message}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
