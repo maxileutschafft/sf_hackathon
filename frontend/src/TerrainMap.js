@@ -227,8 +227,9 @@ function TerrainMap({ uavs, selectedUavId, onSelectUav }) {
 
     map.current.setStyle(styleUrl);
 
-    // Re-add terrain after style change
+    // Re-add terrain and UAV layers after style change
     map.current.once('style.load', () => {
+      // Add DEM source if needed (satellite view)
       if (newStyle && !map.current.getSource('mapbox-dem')) {
         map.current.addSource('mapbox-dem', {
           type: 'raster-dem',
@@ -238,9 +239,87 @@ function TerrainMap({ uavs, selectedUavId, onSelectUav }) {
         });
       }
 
+      // Set terrain
       map.current.setTerrain({
         source: 'mapbox-dem',
         exaggeration: 1.5
+      });
+
+      // Re-add all UAV layers
+      const metersToLng = 0.00001;
+      const metersToLat = 0.00001;
+
+      Object.entries(uavs).forEach(([uavId, uav]) => {
+        const newLng = lng + (uav.position.y * metersToLng);
+        const newLat = lat + (uav.position.x * metersToLat);
+        const altitude = uav.position.z;
+
+        // Re-add vertical line
+        const lineSourceId = `uav-line-${uavId}`;
+        if (!map.current.getSource(lineSourceId)) {
+          map.current.addSource(lineSourceId, {
+            type: 'geojson',
+            data: {
+              type: 'Feature',
+              geometry: {
+                type: 'LineString',
+                coordinates: [[newLng, newLat, 0], [newLng, newLat, altitude]]
+              }
+            }
+          });
+
+          map.current.addLayer({
+            id: lineSourceId,
+            type: 'line',
+            source: lineSourceId,
+            paint: {
+              'line-color': uav.color,
+              'line-width': 2,
+              'line-opacity': 0.7
+            }
+          });
+        }
+
+        // Re-add UAV point
+        const pointSourceId = `uav-point-${uavId}`;
+        if (!map.current.getSource(pointSourceId)) {
+          map.current.addSource(pointSourceId, {
+            type: 'geojson',
+            data: {
+              type: 'Feature',
+              geometry: {
+                type: 'Point',
+                coordinates: [newLng, newLat, altitude]
+              }
+            }
+          });
+
+          map.current.addLayer({
+            id: pointSourceId,
+            type: 'circle',
+            source: pointSourceId,
+            paint: {
+              'circle-radius': selectedUavId === uavId ? 10 : 8,
+              'circle-color': uav.color,
+              'circle-stroke-width': 2,
+              'circle-stroke-color': '#ffffff',
+              'circle-opacity': 1
+            }
+          });
+
+          // Re-attach click handlers
+          map.current.on('click', pointSourceId, () => {
+            onSelectUav(uavId);
+          });
+
+          map.current.on('mouseenter', pointSourceId, () => {
+            map.current.getCanvas().style.cursor = 'pointer';
+          });
+
+          map.current.on('mouseleave', pointSourceId, () => {
+            map.current.getCanvas().style.cursor = '';
+          });
+        }
       });
     });
   };
