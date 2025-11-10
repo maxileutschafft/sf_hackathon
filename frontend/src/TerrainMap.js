@@ -214,36 +214,39 @@ function TerrainMap({ uavs, selectedUavId, onSelectUav }) {
               type: 'hillshade',
               source: 'mapbox-dem',
               paint: {
-                'hillshade-exaggeration': 1.5,
+                'hillshade-exaggeration': 1.2,
                 'hillshade-shadow-color': '#050810',
                 'hillshade-highlight-color': '#00bfff',
-                'hillshade-accent-color': '#0af',
-                'hillshade-illumination-direction': 315,
-                'hillshade-illumination-anchor': 'viewport'
+                'hillshade-accent-color': '#0af'
               }
             }
-          ]
+          ],
+          terrain: {
+            source: 'mapbox-dem',
+            exaggeration: 1.5
+          }
         };
 
     map.current.setStyle(styleUrl);
 
-    // Re-add terrain and UAV layers after style change
+    // Re-add UAV layers after style change
     map.current.once('style.load', () => {
-      // Add DEM source if needed (satellite view)
-      if (newStyle && !map.current.getSource('mapbox-dem')) {
-        map.current.addSource('mapbox-dem', {
-          type: 'raster-dem',
-          url: 'mapbox://mapbox.mapbox-terrain-dem-v1',
-          tileSize: 512,
-          maxzoom: 14
+      // Add DEM source and terrain for satellite view (custom style already has it)
+      if (newStyle) {
+        if (!map.current.getSource('mapbox-dem')) {
+          map.current.addSource('mapbox-dem', {
+            type: 'raster-dem',
+            url: 'mapbox://mapbox.mapbox-terrain-dem-v1',
+            tileSize: 512,
+            maxzoom: 14
+          });
+        }
+
+        map.current.setTerrain({
+          source: 'mapbox-dem',
+          exaggeration: 1.5
         });
       }
-
-      // Set terrain
-      map.current.setTerrain({
-        source: 'mapbox-dem',
-        exaggeration: 1.5
-      });
 
       // Re-add all UAV layers
       const metersToLng = 0.00001;
