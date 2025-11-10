@@ -134,7 +134,8 @@ function App() {
 
       {/* Top bar with connection status */}
       <div className="top-bar">
-        <h1>UAV Control System</h1>
+        <h1>ORION ORCHESTRA</h1>
+        <div className="subtitle">Operational Remote Command, High-altitude Execution, Surveillance, Telemetry, Routing, and Automation</div>
         <div className={`connection-status ${connected ? 'connected' : 'disconnected'}`}>
           {connected ? '● Connected' : '○ Disconnected'}
         </div>

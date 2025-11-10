@@ -53,11 +53,22 @@ body {
 
 .top-bar h1 {
   font-family: 'Orbitron', monospace;
-  font-size: 1.3rem;
+  font-size: 1.5rem;
   font-weight: 700;
   color: var(--primary-cyan);
   text-transform: uppercase;
-  letter-spacing: 2px;
+  letter-spacing: 3px;
+  margin: 0;
+}
+
+.top-bar .subtitle {
+  font-size: 0.65rem;
+  color: var(--text-secondary);
+  font-family: 'Share Tech Mono', monospace;
+  opacity: 0.7;
+  letter-spacing: 0.5px;
+  margin-left: 4px;
+  max-width: 600px;
 }
 
 .connection-status {
