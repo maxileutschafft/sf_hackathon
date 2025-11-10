@@ -181,21 +181,58 @@ function TerrainMap({ uavs, selectedUavId, onSelectUav }) {
     const newStyle = !showSatellite;
     setShowSatellite(newStyle);
 
+    // Use satellite or a custom tactical terrain style
     const styleUrl = newStyle
       ? 'mapbox://styles/mapbox/satellite-v9'
-      : 'mapbox://styles/mapbox/outdoors-v12';
+      : {
+          version: 8,
+          sources: {
+            'mapbox-dem': {
+              type: 'raster-dem',
+              url: 'mapbox://mapbox.mapbox-terrain-dem-v1',
+              tileSize: 512,
+              maxzoom: 14
+            }
+          },
+          layers: [
+            {
+              id: 'background',
+              type: 'background',
+              paint: {
+                'background-color': '#0a0e1a'
+              }
+            },
+            {
+              id: 'hillshade',
+              type: 'hillshade',
+              source: 'mapbox-dem',
+              paint: {
+                'hillshade-exaggeration': 1.5,
+                'hillshade-shadow-color': '#050810',
+                'hillshade-highlight-color': '#00bfff',
+                'hillshade-accent-color': '#0af',
+                'hillshade-illumination-direction': 315,
+                'hillshade-illumination-anchor': 'viewport'
+              }
+            }
+          ]
+        };
 
     map.current.setStyle(styleUrl);
 
     // Re-add terrain and layers after style change
     map.current.once('style.load', () => {
-      map.current.addSource('mapbox-dem', {
-        type: 'raster-dem',
-        url: 'mapbox://mapbox.mapbox-terrain-dem-v1',
-        tileSize: 512,
-        maxzoom: 14
-      });
+      // Only add DEM source if switching to satellite (custom style already has it)
+      if (newStyle && !map.current.getSource('mapbox-dem')) {
+        map.current.addSource('mapbox-dem', {
+          type: 'raster-dem',
+          url: 'mapbox://mapbox.mapbox-terrain-dem-v1',
+          tileSize: 512,
+          maxzoom: 14
+        });
+      }
 
+      // Set terrain with 3D effect
       map.current.setTerrain({
         source: 'mapbox-dem',
         exaggeration: 1.5
@@ -210,27 +247,29 @@ function TerrainMap({ uavs, selectedUavId, onSelectUav }) {
         const altitude = uav.position.z;
 
         const lineSourceId = `uav-line-${uavId}`;
-        map.current.addSource(lineSourceId, {
-          type: 'geojson',
-          data: {
-            type: 'Feature',
-            geometry: {
-              type: 'LineString',
-              coordinates: [[newLng, newLat, altitude], [newLng, newLat, 0]]
+        if (!map.current.getSource(lineSourceId)) {
+          map.current.addSource(lineSourceId, {
+            type: 'geojson',
+            data: {
+              type: 'Feature',
+              geometry: {
+                type: 'LineString',
+                coordinates: [[newLng, newLat, altitude], [newLng, newLat, 0]]
+              }
             }
-          }
-        });
+          });
 
-        map.current.addLayer({
-          id: `uav-line-layer-${uavId}`,
-          type: 'line',
-          source: lineSourceId,
-          paint: {
-            'line-color': uav.color,
-            'line-width': 2,
-            'line-opacity': 0.6
-          }
-        });
+          map.current.addLayer({
+            id: `uav-line-layer-${uavId}`,
+            type: 'line',
+            source: lineSourceId,
+            paint: {
+              'line-color': uav.color,
+              'line-width': 2,
+              'line-opacity': 0.6
+            }
+          });
+        }
       });
     });
   };
