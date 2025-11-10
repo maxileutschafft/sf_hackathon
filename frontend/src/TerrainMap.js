@@ -8,7 +8,6 @@ mapboxgl.accessToken = process.env.REACT_APP_MAPBOX_TOKEN || 'pk.eyJ1IjoibWFwYm9
 function TerrainMap({ uavs, selectedUavId, onSelectUav }) {
   const mapContainer = useRef(null);
   const map = useRef(null);
-  const uavMarkers = useRef({});
   // Grand Canyon coordinates (base position)
   const [lng] = useState(-112.1);
   const [lat] = useState(36.1);
@@ -63,7 +62,7 @@ function TerrainMap({ uavs, selectedUavId, onSelectUav }) {
     };
   }, [lng, lat, zoom]);
 
-  // Update UAV markers
+  // Update UAV visualization (lines + points)
   useEffect(() => {
     if (!map.current || !map.current.isStyleLoaded()) return;
 
@@ -75,115 +74,112 @@ function TerrainMap({ uavs, selectedUavId, onSelectUav }) {
       const newLat = lat + (uav.position.x * metersToLat);
       const altitude = uav.position.z;
 
-      console.log(`Updating ${uavId}:`, {
-        position: uav.position,
-        mapCoords: [newLng, newLat],
-        altitude
-      });
+      console.log(`Updating ${uavId}:`, { position: uav.position, mapCoords: [newLng, newLat], altitude });
 
-      // Create or update marker
-      if (!uavMarkers.current[uavId]) {
-        // Create marker element
-        const el = document.createElement('div');
-        el.className = 'uav-marker';
-        el.style.width = '16px';
-        el.style.height = '16px';
-        el.style.borderRadius = '50%';
-        el.style.backgroundColor = uav.color;
-        el.style.border = '2px solid #fff';
-        el.style.cursor = 'pointer';
-        el.style.transition = 'all 0.2s';
-
-        // Add click handler
-        el.addEventListener('click', (e) => {
-          e.stopPropagation();
-          onSelectUav(uavId);
-        });
-
-        // Create marker with altitude offset
-        const marker = new mapboxgl.Marker({
-          element: el,
-          anchor: 'bottom'
-        })
-          .setLngLat([newLng, newLat])
-          .setOffset([0, -altitude * 0.5]) // Visual offset based on altitude
-          .addTo(map.current);
-
-        uavMarkers.current[uavId] = { marker, element: el };
-
-        // Add vertical line source
-        const lineSourceId = `uav-line-${uavId}`;
+      // Vertical line from ground to UAV
+      const lineSourceId = `uav-line-${uavId}`;
+      if (!map.current.getSource(lineSourceId)) {
         map.current.addSource(lineSourceId, {
           type: 'geojson',
           data: {
             type: 'Feature',
             geometry: {
               type: 'LineString',
-              coordinates: [[newLng, newLat, altitude], [newLng, newLat, 0]]
+              coordinates: [[newLng, newLat, 0], [newLng, newLat, altitude]]
             }
           }
         });
 
-        // Add vertical line layer
         map.current.addLayer({
-          id: `uav-line-layer-${uavId}`,
+          id: lineSourceId,
           type: 'line',
           source: lineSourceId,
           paint: {
             'line-color': uav.color,
             'line-width': 2,
-            'line-opacity': 0.6
+            'line-opacity': 0.7
           }
         });
       } else {
-        // Update existing marker position and altitude offset
-        uavMarkers.current[uavId].marker
-          .setLngLat([newLng, newLat])
-          .setOffset([0, -altitude * 0.5]);
+        map.current.getSource(lineSourceId).setData({
+          type: 'Feature',
+          geometry: {
+            type: 'LineString',
+            coordinates: [[newLng, newLat, 0], [newLng, newLat, altitude]]
+          }
+        });
+      }
 
-        // Update vertical line
-        const lineSourceId = `uav-line-${uavId}`;
-        const source = map.current.getSource(lineSourceId);
-        if (source) {
-          source.setData({
+      // UAV point at altitude
+      const pointSourceId = `uav-point-${uavId}`;
+      if (!map.current.getSource(pointSourceId)) {
+        map.current.addSource(pointSourceId, {
+          type: 'geojson',
+          data: {
             type: 'Feature',
             geometry: {
-              type: 'LineString',
-              coordinates: [[newLng, newLat, altitude], [newLng, newLat, 0]]
+              type: 'Point',
+              coordinates: [newLng, newLat, altitude]
             }
-          });
-        }
-      }
+          }
+        });
 
-      // Update marker appearance based on selection
-      const markerEl = uavMarkers.current[uavId].element;
-      if (uavId === selectedUavId) {
-        markerEl.style.width = '20px';
-        markerEl.style.height = '20px';
-        markerEl.style.boxShadow = `0 0 15px ${uav.color}`;
-        markerEl.style.zIndex = '1000';
+        map.current.addLayer({
+          id: pointSourceId,
+          type: 'circle',
+          source: pointSourceId,
+          paint: {
+            'circle-radius': selectedUavId === uavId ? 10 : 8,
+            'circle-color': uav.color,
+            'circle-stroke-width': 2,
+            'circle-stroke-color': '#ffffff',
+            'circle-opacity': 1
+          }
+        });
+
+        // Click to select
+        map.current.on('click', pointSourceId, () => {
+          onSelectUav(uavId);
+        });
+
+        map.current.on('mouseenter', pointSourceId, () => {
+          map.current.getCanvas().style.cursor = 'pointer';
+        });
+
+        map.current.on('mouseleave', pointSourceId, () => {
+          map.current.getCanvas().style.cursor = '';
+        });
       } else {
-        markerEl.style.width = '16px';
-        markerEl.style.height = '16px';
-        markerEl.style.boxShadow = `0 0 4px ${uav.color}`;
-        markerEl.style.zIndex = '1';
+        map.current.getSource(pointSourceId).setData({
+          type: 'Feature',
+          geometry: {
+            type: 'Point',
+            coordinates: [newLng, newLat, altitude]
+          }
+        });
+
+        // Update circle size based on selection
+        map.current.setPaintProperty(pointSourceId, 'circle-radius', selectedUavId === uavId ? 10 : 8);
       }
     });
 
-    // Remove markers for UAVs that no longer exist
-    Object.keys(uavMarkers.current).forEach(uavId => {
-      if (!uavs[uavId]) {
-        uavMarkers.current[uavId].marker.remove();
-        const lineSourceId = `uav-line-${uavId}`;
-        if (map.current.getLayer(`uav-line-layer-${uavId}`)) {
-          map.current.removeLayer(`uav-line-layer-${uavId}`);
+    // Clean up removed UAVs
+    const currentUavIds = Object.keys(uavs);
+    if (map.current.getStyle()) {
+      map.current.getStyle().layers.forEach(layer => {
+        if (layer.id.startsWith('uav-line-') || layer.id.startsWith('uav-point-')) {
+          const uavId = layer.id.replace('uav-line-', '').replace('uav-point-', '');
+          if (!currentUavIds.includes(uavId)) {
+            if (map.current.getLayer(layer.id)) {
+              map.current.removeLayer(layer.id);
+            }
+            if (map.current.getSource(layer.id)) {
+              map.current.removeSource(layer.id);
+            }
+          }
         }
-        if (map.current.getSource(lineSourceId)) {
-          map.current.removeSource(lineSourceId);
-        }
-        delete uavMarkers.current[uavId];
-      }
-    });
+      });
+    }
   }, [uavs, selectedUavId, lng, lat, onSelectUav]);
 
   // Handle terrain style toggle
@@ -193,7 +189,6 @@ function TerrainMap({ uavs, selectedUavId, onSelectUav }) {
     const newStyle = !showSatellite;
     setShowSatellite(newStyle);
 
-    // Use satellite or a custom tactical terrain style
     const styleUrl = newStyle
       ? 'mapbox://styles/mapbox/satellite-v9'
       : {
@@ -232,9 +227,8 @@ function TerrainMap({ uavs, selectedUavId, onSelectUav }) {
 
     map.current.setStyle(styleUrl);
 
-    // Re-add terrain and layers after style change
+    // Re-add terrain after style change
     map.current.once('style.load', () => {
-      // Only add DEM source if switching to satellite (custom style already has it)
       if (newStyle && !map.current.getSource('mapbox-dem')) {
         map.current.addSource('mapbox-dem', {
           type: 'raster-dem',
@@ -244,44 +238,9 @@ function TerrainMap({ uavs, selectedUavId, onSelectUav }) {
         });
       }
 
-      // Set terrain with 3D effect
       map.current.setTerrain({
         source: 'mapbox-dem',
         exaggeration: 1.5
-      });
-
-      // Re-add all UAV lines
-      Object.entries(uavs).forEach(([uavId, uav]) => {
-        const metersToLng = 0.00001;
-        const metersToLat = 0.00001;
-        const newLng = lng + (uav.position.y * metersToLng);
-        const newLat = lat + (uav.position.x * metersToLat);
-        const altitude = uav.position.z;
-
-        const lineSourceId = `uav-line-${uavId}`;
-        if (!map.current.getSource(lineSourceId)) {
-          map.current.addSource(lineSourceId, {
-            type: 'geojson',
-            data: {
-              type: 'Feature',
-              geometry: {
-                type: 'LineString',
-                coordinates: [[newLng, newLat, altitude], [newLng, newLat, 0]]
-              }
-            }
-          });
-
-          map.current.addLayer({
-            id: `uav-line-layer-${uavId}`,
-            type: 'line',
-            source: lineSourceId,
-            paint: {
-              'line-color': uav.color,
-              'line-width': 2,
-              'line-opacity': 0.6
-            }
-          });
-        }
       });
     });
   };
