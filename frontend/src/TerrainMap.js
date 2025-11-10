@@ -75,6 +75,12 @@ function TerrainMap({ uavs, selectedUavId, onSelectUav }) {
       const newLat = lat + (uav.position.x * metersToLat);
       const altitude = uav.position.z;
 
+      console.log(`Updating ${uavId}:`, {
+        position: uav.position,
+        mapCoords: [newLng, newLat],
+        altitude
+      });
+
       // Create or update marker
       if (!uavMarkers.current[uavId]) {
         // Create marker element
@@ -94,9 +100,13 @@ function TerrainMap({ uavs, selectedUavId, onSelectUav }) {
           onSelectUav(uavId);
         });
 
-        // Create marker
-        const marker = new mapboxgl.Marker(el)
+        // Create marker with altitude offset
+        const marker = new mapboxgl.Marker({
+          element: el,
+          anchor: 'bottom'
+        })
           .setLngLat([newLng, newLat])
+          .setOffset([0, -altitude * 0.5]) // Visual offset based on altitude
           .addTo(map.current);
 
         uavMarkers.current[uavId] = { marker, element: el };
@@ -126,8 +136,10 @@ function TerrainMap({ uavs, selectedUavId, onSelectUav }) {
           }
         });
       } else {
-        // Update existing marker
-        uavMarkers.current[uavId].marker.setLngLat([newLng, newLat]);
+        // Update existing marker position and altitude offset
+        uavMarkers.current[uavId].marker
+          .setLngLat([newLng, newLat])
+          .setOffset([0, -altitude * 0.5]);
 
         // Update vertical line
         const lineSourceId = `uav-line-${uavId}`;
