@@ -8,6 +8,10 @@ RUN npm install
 
 COPY . .
 
+# Build arg for Mapbox token
+ARG REACT_APP_MAPBOX_TOKEN
+ENV REACT_APP_MAPBOX_TOKEN=$REACT_APP_MAPBOX_TOKEN
+
 RUN npm run build
 
 FROM nginx:alpine

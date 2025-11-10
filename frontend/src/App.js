@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import './App.css';
+import TerrainMap from './TerrainMap';
 
 function App() {
   const [connected, setConnected] = useState(false);
@@ -121,7 +122,7 @@ function App() {
   return (
     <div className="App">
       <header className="App-header">
-        <h1>🚁 UAV Control System</h1>
+        <h1>UAV Control System</h1>
         <div className={`connection-status ${connected ? 'connected' : 'disconnected'}`}>
           {connected ? '● Connected' : '○ Disconnected'}
         </div>
@@ -129,6 +130,10 @@ function App() {
 
       <div className="main-container">
         <div className="left-panel">
+          <div className="terrain-section">
+            <TerrainMap uavState={uavState} />
+          </div>
+
           <div className="telemetry-section">
             <h2>Telemetry Data</h2>
             <div className="telemetry-grid">
