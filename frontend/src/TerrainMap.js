@@ -66,8 +66,10 @@ function TerrainMap({ uavs, selectedUavId, onSelectUav }) {
   useEffect(() => {
     if (!map.current || !map.current.isStyleLoaded()) return;
 
-    const metersToLng = 0.00001;
-    const metersToLat = 0.00001;
+    // Conversion: 1 degree ≈ 111km at equator
+    // So 1m ≈ 0.000009 degrees, but we'll use 0.0001 for more visible movement
+    const metersToLng = 0.0001;
+    const metersToLat = 0.0001;
 
     Object.entries(uavs).forEach(([uavId, uav]) => {
       const newLng = lng + (uav.position.y * metersToLng);
@@ -191,66 +193,30 @@ function TerrainMap({ uavs, selectedUavId, onSelectUav }) {
 
     const styleUrl = newStyle
       ? 'mapbox://styles/mapbox/satellite-v9'
-      : {
-          version: 8,
-          sources: {
-            'mapbox-dem': {
-              type: 'raster-dem',
-              url: 'mapbox://mapbox.mapbox-terrain-dem-v1',
-              tileSize: 512,
-              maxzoom: 14
-            }
-          },
-          layers: [
-            {
-              id: 'background',
-              type: 'background',
-              paint: {
-                'background-color': '#0a0e1a'
-              }
-            },
-            {
-              id: 'hillshade',
-              type: 'hillshade',
-              source: 'mapbox-dem',
-              paint: {
-                'hillshade-exaggeration': 1.2,
-                'hillshade-shadow-color': '#050810',
-                'hillshade-highlight-color': '#00bfff',
-                'hillshade-accent-color': '#0af'
-              }
-            }
-          ],
-          terrain: {
-            source: 'mapbox-dem',
-            exaggeration: 1.5
-          }
-        };
+      : 'mapbox://styles/mapbox/outdoors-v12';
 
     map.current.setStyle(styleUrl);
 
     // Re-add UAV layers after style change
     map.current.once('style.load', () => {
-      // Add DEM source and terrain for satellite view (custom style already has it)
-      if (newStyle) {
-        if (!map.current.getSource('mapbox-dem')) {
-          map.current.addSource('mapbox-dem', {
-            type: 'raster-dem',
-            url: 'mapbox://mapbox.mapbox-terrain-dem-v1',
-            tileSize: 512,
-            maxzoom: 14
-          });
-        }
-
-        map.current.setTerrain({
-          source: 'mapbox-dem',
-          exaggeration: 1.5
+      // Add DEM source and terrain for both views
+      if (!map.current.getSource('mapbox-dem')) {
+        map.current.addSource('mapbox-dem', {
+          type: 'raster-dem',
+          url: 'mapbox://mapbox.mapbox-terrain-dem-v1',
+          tileSize: 512,
+          maxzoom: 14
         });
       }
 
+      map.current.setTerrain({
+        source: 'mapbox-dem',
+        exaggeration: 1.5
+      });
+
       // Re-add all UAV layers
-      const metersToLng = 0.00001;
-      const metersToLat = 0.00001;
+      const metersToLng = 0.0001;
+      const metersToLat = 0.0001;
 
       Object.entries(uavs).forEach(([uavId, uav]) => {
         const newLng = lng + (uav.position.y * metersToLng);
