@@ -602,3 +602,26 @@ body {
   letter-spacing: 0.5px;
   text-align: center;
 }
+
+/* Home Navigation Button */
+.home-nav-btn {
+  position: absolute;
+  left: 2rem;
+  padding: 0.6rem 1.2rem;
+  background: rgba(0, 191, 255, 0.2);
+  border: 2px solid var(--primary-cyan);
+  color: var(--primary-cyan);
+  font-weight: 700;
+  font-size: 0.9rem;
+  letter-spacing: 0.1rem;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  border-radius: 5px;
+  font-family: 'Orbitron', sans-serif;
+}
+
+.home-nav-btn:hover {
+  background: rgba(0, 191, 255, 0.4);
+  box-shadow: 0 0 15px rgba(0, 191, 255, 0.5);
+  transform: translateX(-3px);
+}
