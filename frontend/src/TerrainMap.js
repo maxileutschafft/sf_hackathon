@@ -5,7 +5,7 @@ import './TerrainMap.css';
 
 mapboxgl.accessToken = process.env.REACT_APP_MAPBOX_TOKEN || 'pk.eyJ1IjoibWFwYm94IiwiYSI6ImNpejY4M29iazA2Z2gycXA4N2pmbDZmangifQ.-g_vE53SD2WrJ6tFX7QHmA';
 
-function TerrainMap({ uavs, selectedUavId, selectedSwarm, onSelectUav, onMapClick, rois, targets, onToggleStyleReady, assemblyMode }) {
+function TerrainMap({ uavs, selectedUavId, selectedSwarm, onSelectUav, onMapClick, rois, targets, onToggleStyleReady, onToggle2DViewReady, assemblyMode, isSelectingTarget, isSelectingOrigin }) {
   const mapContainer = useRef(null);
   const map = useRef(null);
   // Base position: lat 37.5139, lng -122.4961
@@ -14,6 +14,7 @@ function TerrainMap({ uavs, selectedUavId, selectedSwarm, onSelectUav, onMapClic
   const [zoom] = useState(13);
   // Terrain style toggle
   const [showSatellite, setShowSatellite] = useState(true);
+  const [is2DView, setIs2DView] = useState(false);
   const [clickTarget, setClickTarget] = useState(null);
   const [cursorCoords, setCursorCoords] = useState(null);
   const [cursorPixelPos, setCursorPixelPos] = useState(null);
@@ -119,12 +120,19 @@ function TerrainMap({ uavs, selectedUavId, selectedSwarm, onSelectUav, onMapClic
 
     // Add map click handler
     map.current.on('click', (e) => {
+      // Debug: log click events to help trace selection issues
+      console.log('Map clicked at pixel:', e.point, 'lngLat:', e.lngLat);
+
       // Check if click is on a UAV layer
+      const uavLayerList = Object.keys(uavs).map(id => `uav-point-${id}`);
+      console.log('Querying layers for click:', uavLayerList);
       const features = map.current.queryRenderedFeatures(e.point, {
-        layers: Object.keys(uavs).map(id => `uav-point-${id}`)
+        layers: uavLayerList
       });
+      console.log('Features under click:', features.length);
 
       if (features.length === 0 && onMapClick) {
+        console.log('Calling onMapClick callback with', e.lngLat.lng, e.lngLat.lat);
         onMapClick(e.lngLat.lng, e.lngLat.lat);
         setClickTarget({ lng: e.lngLat.lng, lat: e.lngLat.lat, timestamp: Date.now() });
       }
@@ -728,12 +736,73 @@ function TerrainMap({ uavs, selectedUavId, selectedSwarm, onSelectUav, onMapClic
     });
   };
 
+  // Toggle 2D view (top-down bird's eye perspective)
+  const toggle2DView = () => {
+    if (!map.current) return;
+
+    const new2DView = !is2DView;
+    setIs2DView(new2DView);
+
+    if (new2DView) {
+      // Switch to 2D top-down view
+      map.current.easeTo({
+        pitch: 0,
+        bearing: 0,
+        duration: 1000
+      });
+    } else {
+      // Switch back to 3D perspective view
+      map.current.easeTo({
+        pitch: 70,
+        bearing: 0,
+        duration: 1000
+      });
+    }
+  };
+
   // Expose toggleStyle function to parent
   useEffect(() => {
     if (onToggleStyleReady) {
       onToggleStyleReady(() => toggleStyle);
     }
   }, [onToggleStyleReady]);
+
+  // Expose toggle2DView function to parent
+  useEffect(() => {
+    if (onToggle2DViewReady) {
+      onToggle2DViewReady(() => toggle2DView);
+    }
+  }, [onToggle2DViewReady, is2DView]);
+
+  // If parent requests target selection mode, add a click listener directly on the map container
+  useEffect(() => {
+    if (!map.current || !mapContainer.current) return;
+    const container = mapContainer.current;
+
+    const overlayClickHandler = (ev) => {
+      if (!isSelectingTarget && !isSelectingOrigin) return;
+      const rect = container.getBoundingClientRect();
+      const x = ev.clientX - rect.left;
+      const y = ev.clientY - rect.top;
+      if (!map.current) return;
+      const lngLat = map.current.unproject([x, y]);
+      console.log('Overlay click detected:', lngLat);
+      if (onMapClick) onMapClick(lngLat.lng, lngLat.lat);
+      setClickTarget({ lng: lngLat.lng, lat: lngLat.lat, timestamp: Date.now() });
+    };
+
+    if (isSelectingTarget || isSelectingOrigin) {
+      container.style.cursor = 'crosshair';
+      container.addEventListener('click', overlayClickHandler);
+    } else {
+      container.style.cursor = '';
+    }
+
+    return () => {
+      container.removeEventListener('click', overlayClickHandler);
+      if (container) container.style.cursor = '';
+    };
+  }, [isSelectingTarget, isSelectingOrigin, onMapClick]);
 
   const selectedUav = uavs[selectedUavId];
 

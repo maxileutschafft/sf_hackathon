@@ -3,6 +3,8 @@ const http = require('http');
 const WebSocket = require('ws');
 const cors = require('cors');
 const bodyParser = require('body-parser');
+const fs = require('fs');
+const path = require('path');
 
 const app = express();
 const server = http.createServer(app);
@@ -47,6 +49,35 @@ const regionsOfInterest = {};
 
 // Target markers
 const targetMarkers = {};
+
+// Mission planning parameters (persisted to file)
+const missionParamsFile = path.join(__dirname, 'mission_params.json');
+let missionParams = {
+  targets: [],
+  origins: []
+};
+
+// Load mission parameters from file on startup
+try {
+  if (fs.existsSync(missionParamsFile)) {
+    const data = fs.readFileSync(missionParamsFile, 'utf8');
+    missionParams = JSON.parse(data);
+    console.log(`Loaded mission params: ${missionParams.targets.length} targets, ${missionParams.origins.length} origins`);
+  }
+} catch (error) {
+  console.error('Error loading mission params:', error);
+  missionParams = { targets: [], origins: [] };
+}
+
+// Function to save mission parameters to file
+function saveMissionParams() {
+  try {
+    fs.writeFileSync(missionParamsFile, JSON.stringify(missionParams, null, 2));
+    console.log(`Saved mission params: ${missionParams.targets.length} targets, ${missionParams.origins.length} origins`);
+  } catch (error) {
+    console.error('Error saving mission params:', error);
+  }
+}
 
 // WebSocket upgrade handling
 server.on('upgrade', (request, socket, head) => {
@@ -364,6 +395,24 @@ app.post('/api/swarm-formation', (req, res) => {
       message: `Formation '${formation}' not supported or wrong number of drones (need 6 for hexagon)`
     });
   }
+});
+
+// Mission Planning Parameters endpoints
+app.get('/api/mission-params', (req, res) => {
+  res.json(missionParams);
+});
+
+app.post('/api/mission-params', (req, res) => {
+  const { targets, origins } = req.body;
+  missionParams.targets = targets || [];
+  missionParams.origins = origins || [];
+  saveMissionParams();
+  res.json({ success: true, ...missionParams });
+});
+
+// Legacy endpoint for backward compatibility
+app.get('/api/mission-targets', (req, res) => {
+  res.json({ targets: missionParams.targets });
 });
 
 // Start server

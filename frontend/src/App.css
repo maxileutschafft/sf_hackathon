@@ -48,30 +48,41 @@ body {
   box-shadow: 0 4px 20px rgba(0, 191, 255, 0.1);
 }
 
+.top-bar-center {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  text-align: center;
+  pointer-events: none;
+  z-index: 1;
+}
+
 .top-bar h1 {
   font-size: 1.8rem;
   font-weight: 900;
   letter-spacing: 4px;
   color: var(--primary-cyan);
   text-shadow: 0 0 20px rgba(0, 191, 255, 0.5);
+  margin: 0;
 }
 
-.subtitle {
-  flex: 1;
+.top-bar-center .subtitle {
   font-size: 0.65rem;
   color: var(--text-secondary);
   text-align: center;
   letter-spacing: 1px;
   text-transform: uppercase;
+  margin-top: 2px;
+}
+
+.subtitle {
+  flex: 1;
 }
 
 .connection-status {
-  font-size: 0.85rem;
-  font-weight: bold;
-  padding: 8px 16px;
-  border-radius: 4px;
-  border: 2px solid;
-  letter-spacing: 2px;
+  z-index: unset;
+  position: unset;
 }
 
 .connection-status.connected {
@@ -104,6 +115,9 @@ body {
 
 .sidebar-header {
   margin-bottom: 15px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
 }
 
 .topology-toggle-btn {
@@ -605,8 +619,6 @@ body {
 
 /* Home Navigation Button */
 .home-nav-btn {
-  position: absolute;
-  left: 2rem;
   padding: 0.6rem 1.2rem;
   background: rgba(0, 191, 255, 0.2);
   border: 2px solid var(--primary-cyan);
@@ -618,10 +630,13 @@ body {
   transition: all 0.3s ease;
   border-radius: 5px;
   font-family: 'Orbitron', sans-serif;
+  z-index: 10;
+  position: absolute;
+  left: 2rem;
+  transform: translateX(-3px);
 }
 
 .home-nav-btn:hover {
   background: rgba(0, 191, 255, 0.4);
   box-shadow: 0 0 15px rgba(0, 191, 255, 0.5);
-  transform: translateX(-3px);
 }

@@ -26,6 +26,7 @@ function MissionControl({ onNavigateHome }) {
   const [targets, setTargets] = useState([]);
   const [assemblyMode, setAssemblyMode] = useState(null);
   const wsRef = useRef(null);
+  const [onToggle2DView, setOnToggle2DView] = useState(null);
 
   useEffect(() => {
     connectWebSocket();
@@ -287,6 +288,7 @@ function MissionControl({ onNavigateHome }) {
         rois={rois}
         targets={targets}
         onToggleStyleReady={setOnToggleStyle}
+        onToggle2DViewReady={setOnToggle2DView}
         assemblyMode={assemblyMode}
       />
 
@@ -294,8 +296,10 @@ function MissionControl({ onNavigateHome }) {
         <button className="home-nav-btn" onClick={onNavigateHome}>
           ← HOME
         </button>
-        <h1>HIVE - MISSION CONTROL</h1>
-        <div className="subtitle">High-altitude Intelligence & Vigilance Ecosystem</div>
+        <div className="top-bar-center">
+          <h1>HIVE - MISSION CONTROL</h1>
+          <div className="subtitle">High-altitude Intelligence & Vigilance Ecosystem</div>
+        </div>
         <div className={`connection-status ${connected ? 'connected' : 'disconnected'}`}>
           {connected ? '● CONNECTED' : '○ DISCONNECTED'}
         </div>
@@ -308,6 +312,12 @@ function MissionControl({ onNavigateHome }) {
             onClick={() => onToggleStyle && onToggleStyle()}
           >
             TOPOLOGY
+          </button>
+          <button
+            className="topology-toggle-btn"
+            onClick={() => onToggle2DView && onToggle2DView()}
+          >
+            2D VIEW
           </button>
         </div>
 
