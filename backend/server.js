@@ -19,64 +19,33 @@ const wssSimulator = new WebSocket.Server({ noServer: true });
 const clients = new Set();
 const simulatorConnections = new Map(); // Map of uavId -> websocket
 
-// HORNET states organized by SWARM
+// HORNET states organized by SWARM (6 per swarm)
 const uavStates = {
-  'HORNET-1': {
-    id: 'HORNET-1',
-    swarm: 'SWARM-1',
-    position: { x: 0, y: 0, z: 0 },
-    velocity: { x: 0, y: 0, z: 0 },
-    orientation: { pitch: 0, roll: 0, yaw: 0 },
-    battery: 100,
-    status: 'idle',
-    armed: false,
-    color: '#00bfff'
-  },
-  'HORNET-2': {
-    id: 'HORNET-2',
-    swarm: 'SWARM-1',
-    position: { x: 50, y: 50, z: 0 },
-    velocity: { x: 0, y: 0, z: 0 },
-    orientation: { pitch: 0, roll: 0, yaw: 0 },
-    battery: 100,
-    status: 'idle',
-    armed: false,
-    color: '#00ff00'
-  },
-  'HORNET-3': {
-    id: 'HORNET-3',
-    swarm: 'SWARM-2',
-    position: { x: -50, y: 50, z: 0 },
-    velocity: { x: 0, y: 0, z: 0 },
-    orientation: { pitch: 0, roll: 0, yaw: 0 },
-    battery: 100,
-    status: 'idle',
-    armed: false,
-    color: '#ff00ff'
-  },
-  'HORNET-4': {
-    id: 'HORNET-4',
-    swarm: 'SWARM-2',
-    position: { x: 50, y: -50, z: 0 },
-    velocity: { x: 0, y: 0, z: 0 },
-    orientation: { pitch: 0, roll: 0, yaw: 0 },
-    battery: 100,
-    status: 'idle',
-    armed: false,
-    color: '#ffff00'
-  },
-  'HORNET-5': {
-    id: 'HORNET-5',
-    swarm: 'SWARM-2',
-    position: { x: -50, y: -50, z: 0 },
-    velocity: { x: 0, y: 0, z: 0 },
-    orientation: { pitch: 0, roll: 0, yaw: 0 },
-    battery: 100,
-    status: 'idle',
-    armed: false,
-    color: '#ff6600'
-  }
+  // SWARM-1 (Cyan/Blue tones)
+  'HORNET-1': { id: 'HORNET-1', swarm: 'SWARM-1', position: { x: 0, y: 0, z: 0 }, velocity: { x: 0, y: 0, z: 0 }, orientation: { pitch: 0, roll: 0, yaw: 0 }, battery: 100, status: 'idle', armed: false, color: '#00bfff' },
+  'HORNET-2': { id: 'HORNET-2', swarm: 'SWARM-1', position: { x: 20, y: 20, z: 0 }, velocity: { x: 0, y: 0, z: 0 }, orientation: { pitch: 0, roll: 0, yaw: 0 }, battery: 100, status: 'idle', armed: false, color: '#1e90ff' },
+  'HORNET-3': { id: 'HORNET-3', swarm: 'SWARM-1', position: { x: 40, y: 0, z: 0 }, velocity: { x: 0, y: 0, z: 0 }, orientation: { pitch: 0, roll: 0, yaw: 0 }, battery: 100, status: 'idle', armed: false, color: '#4169e1' },
+  'HORNET-4': { id: 'HORNET-4', swarm: 'SWARM-1', position: { x: 20, y: -20, z: 0 }, velocity: { x: 0, y: 0, z: 0 }, orientation: { pitch: 0, roll: 0, yaw: 0 }, battery: 100, status: 'idle', armed: false, color: '#6495ed' },
+  'HORNET-5': { id: 'HORNET-5', swarm: 'SWARM-1', position: { x: -20, y: -20, z: 0 }, velocity: { x: 0, y: 0, z: 0 }, orientation: { pitch: 0, roll: 0, yaw: 0 }, battery: 100, status: 'idle', armed: false, color: '#7b68ee' },
+  'HORNET-6': { id: 'HORNET-6', swarm: 'SWARM-1', position: { x: -20, y: 20, z: 0 }, velocity: { x: 0, y: 0, z: 0 }, orientation: { pitch: 0, roll: 0, yaw: 0 }, battery: 100, status: 'idle', armed: false, color: '#00ced1' },
+
+  // SWARM-2 (Red/Orange tones)
+  'HORNET-7': { id: 'HORNET-7', swarm: 'SWARM-2', position: { x: -100, y: 100, z: 0 }, velocity: { x: 0, y: 0, z: 0 }, orientation: { pitch: 0, roll: 0, yaw: 0 }, battery: 100, status: 'idle', armed: false, color: '#ff0000' },
+  'HORNET-8': { id: 'HORNET-8', swarm: 'SWARM-2', position: { x: -80, y: 120, z: 0 }, velocity: { x: 0, y: 0, z: 0 }, orientation: { pitch: 0, roll: 0, yaw: 0 }, battery: 100, status: 'idle', armed: false, color: '#ff4500' },
+  'HORNET-9': { id: 'HORNET-9', swarm: 'SWARM-2', position: { x: -60, y: 100, z: 0 }, velocity: { x: 0, y: 0, z: 0 }, orientation: { pitch: 0, roll: 0, yaw: 0 }, battery: 100, status: 'idle', armed: false, color: '#ff6347' },
+  'HORNET-10': { id: 'HORNET-10', swarm: 'SWARM-2', position: { x: -80, y: 80, z: 0 }, velocity: { x: 0, y: 0, z: 0 }, orientation: { pitch: 0, roll: 0, yaw: 0 }, battery: 100, status: 'idle', armed: false, color: '#ff8c00' },
+  'HORNET-11': { id: 'HORNET-11', swarm: 'SWARM-2', position: { x: -120, y: 80, z: 0 }, velocity: { x: 0, y: 0, z: 0 }, orientation: { pitch: 0, roll: 0, yaw: 0 }, battery: 100, status: 'idle', armed: false, color: '#ffa500' },
+  'HORNET-12': { id: 'HORNET-12', swarm: 'SWARM-2', position: { x: -120, y: 120, z: 0 }, velocity: { x: 0, y: 0, z: 0 }, orientation: { pitch: 0, roll: 0, yaw: 0 }, battery: 100, status: 'idle', armed: false, color: '#ffA07a' }
 };
+
+// Swarm targets for click-to-move
+const swarmTargets = {};
+
+// Regions of Interest (ROI)
+const regionsOfInterest = {};
+
+// Target markers
+const targetMarkers = {};
 
 // WebSocket upgrade handling
 server.on('upgrade', (request, socket, head) => {
@@ -208,6 +177,103 @@ app.post('/api/command', (req, res) => {
 
 app.get('/api/health', (req, res) => {
   res.json({ status: 'healthy', timestamp: new Date().toISOString() });
+});
+
+// ROI (Region of Interest) endpoints
+app.get('/api/roi', (req, res) => {
+  res.json({ regions: regionsOfInterest });
+});
+
+app.post('/api/roi', (req, res) => {
+  const { id, x, y, radius } = req.body;
+  regionsOfInterest[id] = { id, x, y, radius, timestamp: Date.now() };
+
+  // Broadcast to all clients
+  clients.forEach((client) => {
+    if (client.readyState === WebSocket.OPEN) {
+      client.send(JSON.stringify({
+        type: 'roi_update',
+        data: regionsOfInterest
+      }));
+    }
+  });
+
+  res.json({ success: true, region: regionsOfInterest[id] });
+});
+
+app.delete('/api/roi/:id', (req, res) => {
+  const { id } = req.params;
+  delete regionsOfInterest[id];
+
+  // Broadcast to all clients
+  clients.forEach((client) => {
+    if (client.readyState === WebSocket.OPEN) {
+      client.send(JSON.stringify({
+        type: 'roi_update',
+        data: regionsOfInterest
+      }));
+    }
+  });
+
+  res.json({ success: true });
+});
+
+// Target marker endpoints
+app.get('/api/targets', (req, res) => {
+  res.json({ targets: targetMarkers });
+});
+
+app.post('/api/targets', (req, res) => {
+  const { id, x, y, z } = req.body;
+  targetMarkers[id] = { id, x, y, z, timestamp: Date.now() };
+
+  // Broadcast to all clients
+  clients.forEach((client) => {
+    if (client.readyState === WebSocket.OPEN) {
+      client.send(JSON.stringify({
+        type: 'target_update',
+        data: targetMarkers
+      }));
+    }
+  });
+
+  res.json({ success: true, target: targetMarkers[id] });
+});
+
+app.delete('/api/targets/:id', (req, res) => {
+  const { id } = req.params;
+  delete targetMarkers[id];
+
+  // Broadcast to all clients
+  clients.forEach((client) => {
+    if (client.readyState === WebSocket.OPEN) {
+      client.send(JSON.stringify({
+        type: 'target_update',
+        data: targetMarkers
+      }));
+    }
+  });
+
+  res.json({ success: true });
+});
+
+// Swarm target endpoints
+app.post('/api/swarm-target', (req, res) => {
+  const { swarmId, x, y, z } = req.body;
+  swarmTargets[swarmId] = { x, y, z, timestamp: Date.now() };
+
+  // Broadcast to all clients
+  clients.forEach((client) => {
+    if (client.readyState === WebSocket.OPEN) {
+      client.send(JSON.stringify({
+        type: 'swarm_target_update',
+        swarmId,
+        target: swarmTargets[swarmId]
+      }));
+    }
+  });
+
+  res.json({ success: true, target: swarmTargets[swarmId] });
 });
 
 // Start server

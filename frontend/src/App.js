@@ -18,9 +18,12 @@ function App() {
     }
   });
   const [selectedUavId, setSelectedUavId] = useState('HORNET-1');
+  const [selectedSwarm, setSelectedSwarm] = useState(null);
   const [expandedSwarms, setExpandedSwarms] = useState({ 'SWARM-1': true, 'SWARM-2': true });
   const [logs, setLogs] = useState([]);
   const [showControls, setShowControls] = useState(false);
+  const [rois, setRois] = useState([]);
+  const [targets, setTargets] = useState([]);
   const wsRef = useRef(null);
 
   useEffect(() => {
@@ -59,6 +62,12 @@ function App() {
               ...data.data
             }
           }));
+        } else if (data.type === 'roi_update') {
+          // Update ROIs
+          setRois(data.rois || []);
+        } else if (data.type === 'target_update') {
+          // Update targets
+          setTargets(data.targets || []);
         } else if (data.type === 'command_response') {
           addLog(`Command ${data.command}: ${data.message}`);
         } else if (data.type === 'error') {
@@ -130,12 +139,104 @@ function App() {
     sendCommand('rotate', { yaw: angle });
   };
 
+  const handleMapClick = async (lng, lat) => {
+    const baseCoords = { lng: -122.5, lat: 37.513 };
+    const metersToLng = 0.0001;
+    const metersToLat = 0.0001;
+
+    // Convert map coords to local meters
+    const x = (lat - baseCoords.lat) / metersToLat;
+    const y = (lng - baseCoords.lng) / metersToLng;
+
+    if (selectedSwarm) {
+      // Move entire swarm
+      try {
+        const response = await fetch('http://localhost:3001/api/swarm-target', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ swarmId: selectedSwarm, x, y, z: 50 })
+        });
+        if (response.ok) {
+          addLog(`${selectedSwarm} moving to target`);
+        }
+      } catch (error) {
+        console.error('Error moving swarm:', error);
+      }
+    } else if (selectedUavId) {
+      // Move individual HORNET
+      sendCommand('goto', { x, y, z: 50 });
+    }
+  };
+
+  const handleAssemble = async (swarmName) => {
+    try {
+      const response = await fetch('http://localhost:3001/api/swarm-formation', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ swarmId: swarmName, formation: 'hexagon' })
+      });
+      if (response.ok) {
+        addLog(`${swarmName} assembling into formation`);
+      }
+    } catch (error) {
+      console.error('Error assembling swarm:', error);
+    }
+  };
+
+  const handleSwarmClick = (swarmName) => {
+    setSelectedSwarm(swarmName);
+    setSelectedUavId(null);
+    setExpandedSwarms(prev => ({ ...prev, [swarmName]: !prev[swarmName] }));
+  };
+
+  const handleHornetClick = (uavId) => {
+    setSelectedUavId(uavId);
+    setSelectedSwarm(null);
+  };
+
+  const handleAddROI = async () => {
+    try {
+      const response = await fetch('http://localhost:3001/api/roi', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ x: 0, y: 0, radius: 50 })
+      });
+      if (response.ok) {
+        addLog('ROI added');
+      }
+    } catch (error) {
+      console.error('Error adding ROI:', error);
+    }
+  };
+
+  const handleAddTarget = async () => {
+    try {
+      const response = await fetch('http://localhost:3001/api/target', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ x: 0, y: 0 })
+      });
+      if (response.ok) {
+        addLog('Target added');
+      }
+    } catch (error) {
+      console.error('Error adding target:', error);
+    }
+  };
+
+  const [onToggleStyle, setOnToggleStyle] = useState(null);
+
   return (
     <div className="App">
       <TerrainMap
         uavs={uavs}
         selectedUavId={selectedUavId}
+        selectedSwarm={selectedSwarm}
         onSelectUav={setSelectedUavId}
+        onMapClick={handleMapClick}
+        rois={rois}
+        targets={targets}
+        onToggleStyleReady={setOnToggleStyle}
       />
 
       {/* Top bar */}
@@ -152,9 +253,20 @@ function App() {
         <div className="sidebar-header">
           <button
             className="topology-toggle-btn"
-            onClick={() => document.querySelector('.terrain-map-container button')?.click()}
+            onClick={() => onToggleStyle && onToggleStyle()}
           >
             TOPOLOGY
+          </button>
+        </div>
+
+        {/* Map Tools Section */}
+        <div className="map-tools-section">
+          <h4 className="section-title">MAP TOOLS</h4>
+          <button className="tool-btn" onClick={handleAddROI}>
+            + Add ROI
+          </button>
+          <button className="tool-btn" onClick={handleAddTarget}>
+            + Add Target
           </button>
         </div>
 
@@ -169,19 +281,32 @@ function App() {
         ).map(([swarmName, hornets]) => (
           <div key={swarmName} className="swarm-group">
             <div
-              className="swarm-header"
-              onClick={() => setExpandedSwarms(prev => ({ ...prev, [swarmName]: !prev[swarmName] }))}
+              className={`swarm-header ${selectedSwarm === swarmName ? 'selected' : ''}`}
+              onClick={(e) => {
+                if (!e.target.classList.contains('assemble-btn')) {
+                  handleSwarmClick(swarmName);
+                }
+              }}
             >
               <span className="swarm-toggle">{expandedSwarms[swarmName] ? '▼' : '▶'}</span>
               <span className="swarm-name">{swarmName}</span>
               <span className="swarm-count">{hornets.length}</span>
+              <button
+                className="assemble-btn"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleAssemble(swarmName);
+                }}
+              >
+                ⬡ ASSEMBLE
+              </button>
             </div>
 
             {expandedSwarms[swarmName] && hornets.map(([uavId, uav]) => (
               <div
                 key={uavId}
                 className={`hornet-box ${selectedUavId === uavId ? 'selected' : ''}`}
-                onClick={() => setSelectedUavId(uavId)}
+                onClick={() => handleHornetClick(uavId)}
                 style={{ borderLeftColor: uav.color }}
               >
                 <div className="hornet-header">

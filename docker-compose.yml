@@ -95,6 +95,90 @@ services:
       - backend
     restart: unless-stopped
 
+  hornet-6:
+    build: ./simulator
+    container_name: hornet-simulator-6
+    networks:
+      - uav-network
+    environment:
+      - BACKEND_URL=ws://backend:3001/ws/simulator?id=HORNET-6
+      - UAV_ID=HORNET-6
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+  hornet-7:
+    build: ./simulator
+    container_name: hornet-simulator-7
+    networks:
+      - uav-network
+    environment:
+      - BACKEND_URL=ws://backend:3001/ws/simulator?id=HORNET-7
+      - UAV_ID=HORNET-7
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+  hornet-8:
+    build: ./simulator
+    container_name: hornet-simulator-8
+    networks:
+      - uav-network
+    environment:
+      - BACKEND_URL=ws://backend:3001/ws/simulator?id=HORNET-8
+      - UAV_ID=HORNET-8
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+  hornet-9:
+    build: ./simulator
+    container_name: hornet-simulator-9
+    networks:
+      - uav-network
+    environment:
+      - BACKEND_URL=ws://backend:3001/ws/simulator?id=HORNET-9
+      - UAV_ID=HORNET-9
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+  hornet-10:
+    build: ./simulator
+    container_name: hornet-simulator-10
+    networks:
+      - uav-network
+    environment:
+      - BACKEND_URL=ws://backend:3001/ws/simulator?id=HORNET-10
+      - UAV_ID=HORNET-10
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+  hornet-11:
+    build: ./simulator
+    container_name: hornet-simulator-11
+    networks:
+      - uav-network
+    environment:
+      - BACKEND_URL=ws://backend:3001/ws/simulator?id=HORNET-11
+      - UAV_ID=HORNET-11
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+  hornet-12:
+    build: ./simulator
+    container_name: hornet-simulator-12
+    networks:
+      - uav-network
+    environment:
+      - BACKEND_URL=ws://backend:3001/ws/simulator?id=HORNET-12
+      - UAV_ID=HORNET-12
+    depends_on:
+      - backend
+    restart: unless-stopped
+
 networks:
   uav-network:
     driver: bridge

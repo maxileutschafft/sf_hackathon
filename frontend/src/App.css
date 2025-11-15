@@ -92,7 +92,7 @@ body {
   position: fixed;
   top: 60px;
   left: 0;
-  width: 200px;
+  width: 250px;
   height: calc(100vh - 60px);
   background: var(--panel-bg);
   backdrop-filter: blur(15px);
@@ -427,6 +427,48 @@ body {
   border-radius: 3px;
 }
 
+/* Map Tools Section */
+.map-tools-section {
+  background: rgba(0, 0, 0, 0.4);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  padding: 12px;
+  margin-bottom: 15px;
+}
+
+.section-title {
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  letter-spacing: 1px;
+  margin-bottom: 10px;
+  text-transform: uppercase;
+}
+
+.tool-btn {
+  width: 100%;
+  padding: 10px;
+  background: rgba(0, 191, 255, 0.1);
+  border: 1px solid var(--primary-cyan);
+  border-radius: 4px;
+  color: var(--primary-cyan);
+  font-family: 'Orbitron', sans-serif;
+  font-weight: bold;
+  font-size: 0.75rem;
+  cursor: pointer;
+  transition: all 0.2s;
+  letter-spacing: 1px;
+  margin-bottom: 8px;
+}
+
+.tool-btn:hover {
+  background: rgba(0, 191, 255, 0.2);
+  box-shadow: 0 0 10px rgba(0, 191, 255, 0.4);
+}
+
+.tool-btn:last-child {
+  margin-bottom: 0;
+}
+
 /* SWARM Grouping */
 .swarm-group {
   margin-bottom: 15px;
@@ -450,6 +492,12 @@ body {
   box-shadow: 0 0 15px rgba(0, 191, 255, 0.3);
 }
 
+.swarm-header.selected {
+  background: rgba(0, 191, 255, 0.35);
+  box-shadow: 0 0 20px rgba(0, 191, 255, 0.5);
+  border: 2px solid var(--primary-cyan);
+}
+
 .swarm-toggle {
   font-size: 0.8rem;
   color: var(--primary-cyan);
@@ -470,6 +518,26 @@ body {
   background: rgba(0, 0, 0, 0.4);
   padding: 3px 8px;
   border-radius: 10px;
+}
+
+.assemble-btn {
+  padding: 6px 12px;
+  background: rgba(255, 165, 0, 0.1);
+  border: 1px solid #ffa500;
+  border-radius: 4px;
+  color: #ffa500;
+  font-family: 'Orbitron', sans-serif;
+  font-weight: bold;
+  font-size: 0.7rem;
+  cursor: pointer;
+  transition: all 0.2s;
+  letter-spacing: 1px;
+}
+
+.assemble-btn:hover {
+  background: rgba(255, 165, 0, 0.3);
+  box-shadow: 0 0 10px rgba(255, 165, 0, 0.5);
+  transform: scale(1.05);
 }
 
 /* HORNET Boxes (previously UAV boxes) */
