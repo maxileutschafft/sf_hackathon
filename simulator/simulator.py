@@ -6,9 +6,14 @@ import time
 from datetime import datetime
 
 class UAVSimulator:
-    def __init__(self):
+    def __init__(self, uav_id='UAV-1', initial_position=None):
+        self.uav_id = uav_id
+
         # Position (x, y, z) in meters
-        self.position = {'x': 0.0, 'y': 0.0, 'z': 0.0}
+        if initial_position:
+            self.position = initial_position.copy()
+        else:
+            self.position = {'x': 0.0, 'y': 0.0, 'z': 0.0}
         
         # Velocity (x, y, z) in m/s
         self.velocity = {'x': 0.0, 'y': 0.0, 'z': 0.0}
@@ -206,16 +211,18 @@ class UAVSimulator:
         }
 
 class SimulatorServer:
-    def __init__(self, host='0.0.0.0', port=8765):
+    def __init__(self, host='0.0.0.0', port=8765, uav_id='UAV-1', initial_position=None):
         self.host = host
         self.port = port
-        self.uav = UAVSimulator()
+        self.uav_id = uav_id
+        self.uav = UAVSimulator(uav_id, initial_position)
         self.websocket = None
         self.running = False
-        
+
     async def connect_to_backend(self):
         """Connect to backend server"""
-        backend_url = 'ws://backend:3001/ws/simulator'
+        import os
+        backend_url = os.getenv('BACKEND_URL', f'ws://backend:3001/ws/simulator?id={self.uav_id}')
         
         while True:
             try:
@@ -290,5 +297,22 @@ class SimulatorServer:
         await self.connect_to_backend()
 
 if __name__ == "__main__":
-    simulator = SimulatorServer()
+    import os
+
+    # Get UAV ID and initial position from environment
+    uav_id = os.getenv('UAV_ID', 'UAV-1')
+
+    # Default positions for each HORNET
+    initial_positions = {
+        'HORNET-1': {'x': 0.0, 'y': 0.0, 'z': 0.0},
+        'HORNET-2': {'x': 50.0, 'y': 50.0, 'z': 0.0},
+        'HORNET-3': {'x': -50.0, 'y': 50.0, 'z': 0.0},
+        'HORNET-4': {'x': 50.0, 'y': -50.0, 'z': 0.0},
+        'HORNET-5': {'x': -50.0, 'y': -50.0, 'z': 0.0}
+    }
+
+    initial_position = initial_positions.get(uav_id, {'x': 0.0, 'y': 0.0, 'z': 0.0})
+
+    print(f"Starting simulator for {uav_id} at position {initial_position}")
+    simulator = SimulatorServer(uav_id=uav_id, initial_position=initial_position)
     asyncio.run(simulator.run())

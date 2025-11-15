@@ -139,15 +139,12 @@ function TerrainMap({ uavs, selectedUavId, onSelectUav }) {
           }
         });
 
-        // Click to select
-        map.current.on('click', pointSourceId, () => {
-          onSelectUav(uavId);
-        });
-
+        // Add click handler only once per layer
+        const clickHandler = () => onSelectUav(uavId);
+        map.current.on('click', pointSourceId, clickHandler);
         map.current.on('mouseenter', pointSourceId, () => {
           map.current.getCanvas().style.cursor = 'pointer';
         });
-
         map.current.on('mouseleave', pointSourceId, () => {
           map.current.getCanvas().style.cursor = '';
         });

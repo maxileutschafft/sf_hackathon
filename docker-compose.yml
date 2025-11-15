@@ -35,13 +35,62 @@ services:
       - backend
     restart: unless-stopped
 
-  simulator:
+  hornet-1:
     build: ./simulator
-    container_name: uav-simulator
+    container_name: hornet-simulator-1
     networks:
       - uav-network
     environment:
-      - BACKEND_URL=ws://backend:3001/ws/simulator
+      - BACKEND_URL=ws://backend:3001/ws/simulator?id=HORNET-1
+      - UAV_ID=HORNET-1
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+  hornet-2:
+    build: ./simulator
+    container_name: hornet-simulator-2
+    networks:
+      - uav-network
+    environment:
+      - BACKEND_URL=ws://backend:3001/ws/simulator?id=HORNET-2
+      - UAV_ID=HORNET-2
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+  hornet-3:
+    build: ./simulator
+    container_name: hornet-simulator-3
+    networks:
+      - uav-network
+    environment:
+      - BACKEND_URL=ws://backend:3001/ws/simulator?id=HORNET-3
+      - UAV_ID=HORNET-3
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+  hornet-4:
+    build: ./simulator
+    container_name: hornet-simulator-4
+    networks:
+      - uav-network
+    environment:
+      - BACKEND_URL=ws://backend:3001/ws/simulator?id=HORNET-4
+      - UAV_ID=HORNET-4
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+  hornet-5:
+    build: ./simulator
+    container_name: hornet-simulator-5
+    networks:
+      - uav-network
+    environment:
+      - BACKEND_URL=ws://backend:3001/ws/simulator?id=HORNET-5
+      - UAV_ID=HORNET-5
     depends_on:
       - backend
     restart: unless-stopped

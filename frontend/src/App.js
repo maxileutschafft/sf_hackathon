@@ -5,8 +5,9 @@ import TerrainMap from './TerrainMap';
 function App() {
   const [connected, setConnected] = useState(false);
   const [uavs, setUavs] = useState({
-    'UAV-1': {
-      id: 'UAV-1',
+    'HORNET-1': {
+      id: 'HORNET-1',
+      swarm: 'SWARM-1',
       position: { x: 0, y: 0, z: 0 },
       velocity: { x: 0, y: 0, z: 0 },
       orientation: { pitch: 0, roll: 0, yaw: 0 },
@@ -16,10 +17,10 @@ function App() {
       color: '#00bfff'
     }
   });
-  const [selectedUavId, setSelectedUavId] = useState('UAV-1');
+  const [selectedUavId, setSelectedUavId] = useState('HORNET-1');
+  const [expandedSwarms, setExpandedSwarms] = useState({ 'SWARM-1': true, 'SWARM-2': true });
   const [logs, setLogs] = useState([]);
   const [showControls, setShowControls] = useState(false);
-  const [showLogs, setShowLogs] = useState(false);
   const wsRef = useRef(null);
 
   useEffect(() => {
@@ -45,12 +46,16 @@ function App() {
       try {
         const data = JSON.parse(event.data);
 
-        if (data.type === 'state_update') {
-          // Update the simulator UAV state
+        if (data.type === 'initial_state') {
+          // Initial state with all UAVs
+          setUavs(data.data);
+        } else if (data.type === 'state_update') {
+          // Update specific UAV state
+          const uavId = data.uavId || 'UAV-1';
           setUavs(prev => ({
             ...prev,
-            'UAV-1': {
-              ...prev['UAV-1'],
+            [uavId]: {
+              ...prev[uavId],
               ...data.data
             }
           }));
@@ -92,9 +97,10 @@ function App() {
         type: 'command',
         command,
         params,
+        uavId: selectedUavId,
         timestamp: Date.now()
       }));
-      addLog(`Sent command: ${command}`);
+      addLog(`[${selectedUavId}] Sent command: ${command}`);
     } else {
       addLog('Not connected to server', 'error');
     }
@@ -132,61 +138,96 @@ function App() {
         onSelectUav={setSelectedUavId}
       />
 
-      {/* Top bar with connection status */}
+      {/* Top bar */}
       <div className="top-bar">
-        <h1>ORION ORCHESTRA</h1>
-        <div className="subtitle">Operational Remote Command, High-altitude Execution, Surveillance, Telemetry, Routing, and Automation</div>
+        <h1>HIVE</h1>
+        <div className="subtitle">High-altitude Intelligence & Vigilance Ecosystem</div>
         <div className={`connection-status ${connected ? 'connected' : 'disconnected'}`}>
-          {connected ? '● Connected' : '○ Disconnected'}
+          {connected ? '● CONNECTED' : '○ DISCONNECTED'}
         </div>
       </div>
 
-      {/* Floating control buttons */}
-      <div className="floating-buttons">
+      {/* Left Sidebar with SWARM Groups */}
+      <div className="left-sidebar">
+        <div className="sidebar-header">
+          <button
+            className="topology-toggle-btn"
+            onClick={() => document.querySelector('.terrain-map-container button')?.click()}
+          >
+            TOPOLOGY
+          </button>
+        </div>
+
+        {/* Group HORNETs by SWARM */}
+        {Object.entries(
+          Object.entries(uavs).reduce((swarms, [uavId, uav]) => {
+            const swarmName = uav.swarm || 'UNASSIGNED';
+            if (!swarms[swarmName]) swarms[swarmName] = [];
+            swarms[swarmName].push([uavId, uav]);
+            return swarms;
+          }, {})
+        ).map(([swarmName, hornets]) => (
+          <div key={swarmName} className="swarm-group">
+            <div
+              className="swarm-header"
+              onClick={() => setExpandedSwarms(prev => ({ ...prev, [swarmName]: !prev[swarmName] }))}
+            >
+              <span className="swarm-toggle">{expandedSwarms[swarmName] ? '▼' : '▶'}</span>
+              <span className="swarm-name">{swarmName}</span>
+              <span className="swarm-count">{hornets.length}</span>
+            </div>
+
+            {expandedSwarms[swarmName] && hornets.map(([uavId, uav]) => (
+              <div
+                key={uavId}
+                className={`hornet-box ${selectedUavId === uavId ? 'selected' : ''}`}
+                onClick={() => setSelectedUavId(uavId)}
+                style={{ borderLeftColor: uav.color }}
+              >
+                <div className="hornet-header">
+                  <div className="hornet-indicator" style={{ backgroundColor: uav.color }}></div>
+                  <h3>{uavId}</h3>
+                </div>
+                <div className="hornet-stats">
+                  <div className="stat-row">
+                    <span className="stat-label">Alt:</span>
+                    <span className="stat-value">{uav.position.z.toFixed(1)}m</span>
+                  </div>
+                  <div className="stat-row">
+                    <span className="stat-label">Status:</span>
+                    <span className={`stat-value status-${uav.status}`}>{uav.status}</span>
+                  </div>
+                  <div className="stat-row">
+                    <span className="stat-label">Battery:</span>
+                    <span className="stat-value">{uav.battery.toFixed(0)}%</span>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        ))}
+      </div>
+
+      {/* Controls toggle button */}
+      <div className="floating-controls-btn">
         <button
           className={`toggle-btn ${showControls ? 'active' : ''}`}
           onClick={() => setShowControls(!showControls)}
         >
-          Controls
-        </button>
-        <button
-          className={`toggle-btn ${showLogs ? 'active' : ''}`}
-          onClick={() => setShowLogs(!showLogs)}
-        >
-          Logs
+          {showControls ? '✕' : '⚙'} CONTROLS
         </button>
       </div>
 
       {/* Collapsible Controls Panel */}
       {showControls && (
-        <div className="overlay-panel controls-panel">
+        <div className="controls-panel">
           <div className="panel-header">
             <h2>Flight Controls - {selectedUav.id}</h2>
             <button className="close-btn" onClick={() => setShowControls(false)}>✕</button>
           </div>
 
           <div className="panel-content">
-            {/* Telemetry */}
-            <div className="telemetry-compact">
-              <div className="telemetry-row">
-                <span className="label">Status:</span>
-                <span className={`value status-${selectedUav.status}`}>{selectedUav.status}</span>
-              </div>
-              <div className="telemetry-row">
-                <span className="label">Battery:</span>
-                <span className="value">{selectedUav.battery}%</span>
-              </div>
-              <div className="telemetry-row">
-                <span className="label">Altitude:</span>
-                <span className="value">{selectedUav.position.z.toFixed(1)}m</span>
-              </div>
-              <div className="telemetry-row">
-                <span className="label">Armed:</span>
-                <span className="value">{selectedUav.armed ? 'YES' : 'NO'}</span>
-              </div>
-            </div>
-
-            {/* Control Groups */}
+            {/* System Controls */}
             <div className="control-group">
               <h3>System</h3>
               <div className="button-row">
@@ -301,26 +342,6 @@ function App() {
                   ↻ CW
                 </button>
               </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Collapsible Logs Panel */}
-      {showLogs && (
-        <div className="overlay-panel logs-panel">
-          <div className="panel-header">
-            <h2>System Logs</h2>
-            <button className="close-btn" onClick={() => setShowLogs(false)}>✕</button>
-          </div>
-          <div className="panel-content">
-            <div className="logs-container">
-              {logs.map((log, index) => (
-                <div key={index} className={`log-entry log-${log.type}`}>
-                  <span className="log-timestamp">{log.timestamp}</span>
-                  <span className="log-message">{log.message}</span>
-                </div>
-              ))}
             </div>
           </div>
         </div>
