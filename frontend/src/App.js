@@ -101,16 +101,19 @@ function App() {
     setLogs(prev => [...prev.slice(-49), { timestamp, message, type }]);
   };
 
-  const sendCommand = (command, params = {}) => {
+  const sendCommand = (command, params = {}, uavId = null) => {
+    const targetUavId = uavId || selectedUavId;
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({
+      const commandData = {
         type: 'command',
         command,
         params,
-        uavId: selectedUavId,
+        uavId: targetUavId,
         timestamp: Date.now()
-      }));
-      addLog(`[${selectedUavId}] Sent command: ${command}`);
+      };
+      console.log('Sending command:', commandData);
+      wsRef.current.send(JSON.stringify(commandData));
+      addLog(`[${targetUavId}] Sent command: ${command}`);
     } else {
       addLog('Not connected to server', 'error');
     }
@@ -159,7 +162,8 @@ function App() {
     } else if (selectedUavId) {
       // Set altitude for individual drone
       const uav = uavs[selectedUavId];
-      sendCommand('goto', { x: uav.position.x, y: uav.position.y, z: altitude });
+      console.log(`Setting altitude for ${selectedUavId} to ${altitude}m`);
+      sendCommand('goto', { x: uav.position.x, y: uav.position.y, z: altitude }, selectedUavId);
       addLog(`${selectedUavId} moving to ${altitude}m altitude`);
     }
   };
@@ -193,6 +197,9 @@ function App() {
     // Convert map coords to local meters
     const x = (lat - baseCoords.lat) / metersToLat;
     const y = (lng - baseCoords.lng) / metersToLng;
+
+    console.log(`Map clicked: lng=${lng}, lat=${lat} -> x=${x}, y=${y}`);
+    console.log(`Selected UAV: ${selectedUavId}, Selected Swarm: ${selectedSwarm}`);
 
     // Check if we're in assembly mode
     if (assemblyMode) {
@@ -228,7 +235,8 @@ function App() {
       }
     } else if (selectedUavId) {
       // Move individual HORNET
-      sendCommand('goto', { x, y, z: 50 });
+      console.log(`Sending goto command to ${selectedUavId} with coords x=${x}, y=${y}, z=50`);
+      sendCommand('goto', { x, y, z: 50 }, selectedUavId);
     }
   };
 
