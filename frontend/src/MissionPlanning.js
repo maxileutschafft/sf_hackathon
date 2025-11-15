@@ -20,6 +20,21 @@ function MissionPlanning({ onNavigateHome }) {
     loadMissionParams();
   }, []);
 
+  // ESC key handler to exit selection modes
+  useEffect(() => {
+    const handleEscKey = (event) => {
+      if (event.key === 'Escape') {
+        setIsSelectingTarget(false);
+        setIsSelectingOrigin(false);
+      }
+    };
+
+    window.addEventListener('keydown', handleEscKey);
+    return () => {
+      window.removeEventListener('keydown', handleEscKey);
+    };
+  }, []);
+
   const loadMissionParams = async () => {
     try {
       const response = await fetch('http://localhost:3001/api/mission-params');
@@ -170,7 +185,22 @@ function MissionPlanning({ onNavigateHome }) {
         isSelectingTarget={isSelectingTarget}
         isSelectingOrigin={isSelectingOrigin}
         rois={[]}
-        targets={targets.map(t => ({ x: t.x, y: t.y, z: 0, id: t.id }))}
+        targets={targets.map(t => ({
+          id: t.id,
+          x: t.x,
+          y: t.y,
+          lat: t.lat,
+          lng: t.lng,
+          z: 0
+        }))}
+        origins={origins.map(o => ({
+          id: o.id,
+          x: o.x,
+          y: o.y,
+          lat: o.lat,
+          lng: o.lng,
+          z: 0
+        }))}
         onToggleStyleReady={setOnToggleStyle}
         onToggle2DViewReady={setOnToggle2DView}
         assemblyMode={null}

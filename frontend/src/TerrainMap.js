@@ -5,7 +5,10 @@ import './TerrainMap.css';
 
 mapboxgl.accessToken = process.env.REACT_APP_MAPBOX_TOKEN || 'pk.eyJ1IjoibWFwYm94IiwiYSI6ImNpejY4M29iazA2Z2gycXA4N2pmbDZmangifQ.-g_vE53SD2WrJ6tFX7QHmA';
 
-function TerrainMap({ uavs, selectedUavId, selectedSwarm, onSelectUav, onMapClick, rois, targets, onToggleStyleReady, onToggle2DViewReady, assemblyMode, isSelectingTarget, isSelectingOrigin }) {
+const METERS_TO_LNG = 0.0001;
+const METERS_TO_LAT = 0.0001;
+
+function TerrainMap({ uavs, selectedUavId, selectedSwarm, onSelectUav, onMapClick, rois, targets, origins = [], onToggleStyleReady, onToggle2DViewReady, assemblyMode, isSelectingTarget, isSelectingOrigin }) {
   const mapContainer = useRef(null);
   const map = useRef(null);
   // Base position: lat 37.5139, lng -122.4961
@@ -15,15 +18,48 @@ function TerrainMap({ uavs, selectedUavId, selectedSwarm, onSelectUav, onMapClic
   // Terrain style toggle
   const [showSatellite, setShowSatellite] = useState(true);
   const [is2DView, setIs2DView] = useState(false);
-  const [clickTarget, setClickTarget] = useState(null);
+  const [styleVersion, setStyleVersion] = useState(0);
   const [cursorCoords, setCursorCoords] = useState(null);
   const [cursorPixelPos, setCursorPixelPos] = useState(null);
+
+  const convertPointToLngLat = (point) => {
+    if (point && typeof point.lng === 'number' && typeof point.lat === 'number') {
+      return [point.lng, point.lat];
+    }
+    if (point && typeof point.x === 'number' && typeof point.y === 'number') {
+      return [
+        lng + (point.y * METERS_TO_LNG),
+        lat + (point.x * METERS_TO_LAT)
+      ];
+    }
+    return [lng, lat];
+  };
 
   // Initialize map
   useEffect(() => {
     if (map.current) return;
 
     console.log('Initializing map at Half Moon Bay Airport:', lng, lat);
+
+    const handleStyleLoad = () => {
+      if (!map.current) return;
+
+      if (!map.current.getSource('mapbox-dem')) {
+        map.current.addSource('mapbox-dem', {
+          type: 'raster-dem',
+          url: 'mapbox://mapbox.mapbox-terrain-dem-v1',
+          tileSize: 512,
+          maxzoom: 14
+        });
+      }
+
+      map.current.setTerrain({
+        source: 'mapbox-dem',
+        exaggeration: 1.5
+      });
+
+      setStyleVersion(prev => prev + 1);
+    };
 
     map.current = new mapboxgl.Map({
       container: mapContainer.current,
@@ -36,21 +72,10 @@ function TerrainMap({ uavs, selectedUavId, selectedSwarm, onSelectUav, onMapClic
       attributionControl: false
     });
 
+    map.current.on('style.load', handleStyleLoad);
+
     map.current.on('load', () => {
       console.log('Map loaded successfully!');
-
-      // Add 3D terrain
-      map.current.addSource('mapbox-dem', {
-        type: 'raster-dem',
-        url: 'mapbox://mapbox.mapbox-terrain-dem-v1',
-        tileSize: 512,
-        maxzoom: 14
-      });
-
-      map.current.setTerrain({
-        source: 'mapbox-dem',
-        exaggeration: 1.5
-      });
 
       // Add 1km boundary box
       const boundarySize = 500; // 500m from center = 1km box
@@ -134,7 +159,6 @@ function TerrainMap({ uavs, selectedUavId, selectedSwarm, onSelectUav, onMapClic
       if (features.length === 0 && onMapClick) {
         console.log('Calling onMapClick callback with', e.lngLat.lng, e.lngLat.lat);
         onMapClick(e.lngLat.lng, e.lngLat.lat);
-        setClickTarget({ lng: e.lngLat.lng, lat: e.lngLat.lat, timestamp: Date.now() });
       }
     });
 
@@ -156,6 +180,7 @@ function TerrainMap({ uavs, selectedUavId, selectedSwarm, onSelectUav, onMapClic
 
     return () => {
       if (map.current) {
+        map.current.off('style.load', handleStyleLoad);
         map.current.remove();
       }
     };
@@ -278,7 +303,7 @@ function TerrainMap({ uavs, selectedUavId, selectedSwarm, onSelectUav, onMapClic
         }
       });
     }
-  }, [uavs, selectedUavId, lng, lat, onSelectUav]);
+  }, [uavs, selectedUavId, lng, lat, onSelectUav, styleVersion]);
 
   // ROI circles visualization
   useEffect(() => {
@@ -330,138 +355,221 @@ function TerrainMap({ uavs, selectedUavId, selectedSwarm, onSelectUav, onMapClic
         });
       }
     });
-  }, [rois, lng, lat]);
+  }, [rois, lng, lat, styleVersion]);
 
   // Target markers visualization
   useEffect(() => {
     if (!map.current || !map.current.isStyleLoaded()) return;
 
-    const metersToLng = 0.0001;
-    const metersToLat = 0.0001;
+    const activeTargetIds = new Set();
 
     targets.forEach((target, index) => {
-      const targetLng = lng + (target.y * metersToLng);
-      const targetLat = lat + (target.x * metersToLat);
+      const markerId = target.id || `target-${index}`;
+      activeTargetIds.add(markerId);
+      const [targetLng, targetLat] = convertPointToLngLat(target);
+      const altitude = typeof target.z === 'number' ? target.z : 0;
 
-      const sourceId = `target-${index}`;
-      const layerId = `target-marker-${index}`;
+      const lineSourceId = `target-line-${markerId}`;
+      const pointSourceId = `target-point-${markerId}`;
 
-      if (!map.current.getSource(sourceId)) {
-        map.current.addSource(sourceId, {
+      if (!map.current.getSource(lineSourceId)) {
+        map.current.addSource(lineSourceId, {
           type: 'geojson',
           data: {
             type: 'Feature',
             geometry: {
-              type: 'Point',
-              coordinates: [targetLng, targetLat, 0]
+              type: 'LineString',
+              coordinates: [
+                [targetLng, targetLat, 0],
+                [targetLng, targetLat, altitude]
+              ]
             }
           }
         });
 
         map.current.addLayer({
-          id: layerId,
-          type: 'circle',
-          source: sourceId,
+          id: lineSourceId,
+          type: 'line',
+          source: lineSourceId,
           paint: {
-            'circle-radius': 12,
-            'circle-color': '#ff0000',
-            'circle-opacity': 1,
-            'circle-stroke-width': 3,
-            'circle-stroke-color': '#ffffff'
+            'line-color': '#ff0000',
+            'line-width': 2,
+            'line-opacity': 0.7
           }
         });
       } else {
-        map.current.getSource(sourceId).setData({
+        map.current.getSource(lineSourceId).setData({
+          type: 'Feature',
+          geometry: {
+            type: 'LineString',
+            coordinates: [
+              [targetLng, targetLat, 0],
+              [targetLng, targetLat, altitude]
+            ]
+          }
+        });
+      }
+
+      if (!map.current.getSource(pointSourceId)) {
+        map.current.addSource(pointSourceId, {
+          type: 'geojson',
+          data: {
+            type: 'Feature',
+            geometry: {
+              type: 'Point',
+              coordinates: [targetLng, targetLat, altitude]
+            }
+          }
+        });
+
+        map.current.addLayer({
+          id: pointSourceId,
+          type: 'circle',
+          source: pointSourceId,
+          paint: {
+            'circle-radius': 8,
+            'circle-color': '#ff0000',
+            'circle-stroke-width': 2,
+            'circle-stroke-color': '#ffffff',
+            'circle-opacity': 1
+          }
+        });
+      } else {
+        map.current.getSource(pointSourceId).setData({
           type: 'Feature',
           geometry: {
             type: 'Point',
-            coordinates: [targetLng, targetLat, 0]
+            coordinates: [targetLng, targetLat, altitude]
           }
         });
       }
     });
-  }, [targets, lng, lat]);
 
-  // Click target pulsating marker
-  useEffect(() => {
-    if (!map.current || !map.current.isStyleLoaded() || !clickTarget) return;
-
-    const sourceId = 'click-target';
-    const layerId = 'click-target-marker';
-
-    if (!map.current.getSource(sourceId)) {
-      map.current.addSource(sourceId, {
-        type: 'geojson',
-        data: {
-          type: 'Feature',
-          geometry: {
-            type: 'Point',
-            coordinates: [clickTarget.lng, clickTarget.lat, 0]
+    // Clean up removed target markers
+    const style = map.current.getStyle();
+    if (style?.layers) {
+      style.layers.forEach(layer => {
+        if (layer.id.startsWith('target-line-') || layer.id.startsWith('target-point-')) {
+          const markerId = layer.id.replace('target-line-', '').replace('target-point-', '');
+          if (!activeTargetIds.has(markerId)) {
+            if (map.current.getLayer(layer.id)) {
+              map.current.removeLayer(layer.id);
+            }
+            if (map.current.getSource(layer.id)) {
+              map.current.removeSource(layer.id);
+            }
           }
         }
       });
+    }
+  }, [targets, lng, lat, styleVersion]);
 
-      map.current.addLayer({
-        id: layerId,
-        type: 'circle',
-        source: sourceId,
-        paint: {
-          'circle-radius': [
-            'interpolate',
-            ['linear'],
-            ['zoom'],
-            10, 15,
-            15, 30
-          ],
-          'circle-color': '#00ff00',
-          'circle-opacity': 0.4,
-          'circle-stroke-width': 3,
-          'circle-stroke-color': '#00ff00',
-          'circle-stroke-opacity': 0.8
-        }
-      });
+  // Origin markers visualization (green markers)
+  useEffect(() => {
+    if (!map.current || !map.current.isStyleLoaded() || !origins) return;
+    const activeOriginIds = new Set();
 
-      // Pulsate animation
-      let radius = 15;
-      let growing = true;
-      const interval = setInterval(() => {
-        if (!map.current.getLayer(layerId)) {
-          clearInterval(interval);
-          return;
-        }
-        radius = growing ? radius + 1 : radius - 1;
-        if (radius >= 25) growing = false;
-        if (radius <= 15) growing = true;
+    origins.forEach((origin, index) => {
+      const markerId = origin.id || `origin-${index}`;
+      activeOriginIds.add(markerId);
 
-        map.current.setPaintProperty(layerId, 'circle-radius', [
-          'interpolate',
-          ['linear'],
-          ['zoom'],
-          10, radius,
-          15, radius * 2
-        ]);
-      }, 50);
+      const [originLng, originLat] = convertPointToLngLat(origin);
+      const altitude = typeof origin.z === 'number' ? origin.z : 0;
 
-      // Remove after 5 seconds
-      setTimeout(() => {
-        clearInterval(interval);
-        if (map.current.getLayer(layerId)) {
-          map.current.removeLayer(layerId);
-        }
-        if (map.current.getSource(sourceId)) {
-          map.current.removeSource(sourceId);
-        }
-      }, 5000);
-    } else {
-      map.current.getSource(sourceId).setData({
-        type: 'Feature',
-        geometry: {
-          type: 'Point',
-          coordinates: [clickTarget.lng, clickTarget.lat, 0]
+      const lineSourceId = `origin-line-${markerId}`;
+      const pointSourceId = `origin-point-${markerId}`;
+
+      if (!map.current.getSource(lineSourceId)) {
+        map.current.addSource(lineSourceId, {
+          type: 'geojson',
+          data: {
+            type: 'Feature',
+            geometry: {
+              type: 'LineString',
+              coordinates: [
+                [originLng, originLat, 0],
+                [originLng, originLat, altitude]
+              ]
+            }
+          }
+        });
+
+        map.current.addLayer({
+          id: lineSourceId,
+          type: 'line',
+          source: lineSourceId,
+          paint: {
+            'line-color': '#00ff00',
+            'line-width': 2,
+            'line-opacity': 0.7
+          }
+        });
+      } else {
+        map.current.getSource(lineSourceId).setData({
+          type: 'Feature',
+          geometry: {
+            type: 'LineString',
+            coordinates: [
+              [originLng, originLat, 0],
+              [originLng, originLat, altitude]
+            ]
+          }
+        });
+      }
+
+      if (!map.current.getSource(pointSourceId)) {
+        map.current.addSource(pointSourceId, {
+          type: 'geojson',
+          data: {
+            type: 'Feature',
+            geometry: {
+              type: 'Point',
+              coordinates: [originLng, originLat, altitude]
+            }
+          }
+        });
+
+        map.current.addLayer({
+          id: pointSourceId,
+          type: 'circle',
+          source: pointSourceId,
+          paint: {
+            'circle-radius': 8,
+            'circle-color': '#00ff00',
+            'circle-stroke-width': 2,
+            'circle-stroke-color': '#ffffff',
+            'circle-opacity': 1
+          }
+        });
+      } else {
+        map.current.getSource(pointSourceId).setData({
+          type: 'Feature',
+          geometry: {
+            type: 'Point',
+            coordinates: [originLng, originLat, altitude]
+          }
+        });
+      }
+    });
+
+    const style = map.current.getStyle();
+    if (style?.layers) {
+      style.layers.forEach(layer => {
+        if (layer.id.startsWith('origin-line-') || layer.id.startsWith('origin-point-')) {
+          const markerId = layer.id.replace('origin-line-', '').replace('origin-point-', '');
+          if (!activeOriginIds.has(markerId)) {
+            if (map.current.getLayer(layer.id)) {
+              map.current.removeLayer(layer.id);
+            }
+            if (map.current.getSource(layer.id)) {
+              map.current.removeSource(layer.id);
+            }
+          }
         }
       });
     }
-  }, [clickTarget]);
+  }, [origins, lng, lat, styleVersion]);
+
 
   // Formation lines and swarm label
   useEffect(() => {
@@ -639,101 +747,6 @@ function TerrainMap({ uavs, selectedUavId, selectedSwarm, onSelectUav, onMapClic
       : 'mapbox://styles/mapbox/outdoors-v12';
 
     map.current.setStyle(styleUrl);
-
-    // Re-add UAV layers after style change
-    map.current.once('style.load', () => {
-      // Add DEM source and terrain for both views
-      if (!map.current.getSource('mapbox-dem')) {
-        map.current.addSource('mapbox-dem', {
-          type: 'raster-dem',
-          url: 'mapbox://mapbox.mapbox-terrain-dem-v1',
-          tileSize: 512,
-          maxzoom: 14
-        });
-      }
-
-      map.current.setTerrain({
-        source: 'mapbox-dem',
-        exaggeration: 1.5
-      });
-
-      // Re-add all UAV layers
-      const metersToLng = 0.0001;
-      const metersToLat = 0.0001;
-
-      Object.entries(uavs).forEach(([uavId, uav]) => {
-        const newLng = lng + (uav.position.y * metersToLng);
-        const newLat = lat + (uav.position.x * metersToLat);
-        const altitude = uav.position.z;
-
-        // Re-add vertical line
-        const lineSourceId = `uav-line-${uavId}`;
-        if (!map.current.getSource(lineSourceId)) {
-          map.current.addSource(lineSourceId, {
-            type: 'geojson',
-            data: {
-              type: 'Feature',
-              geometry: {
-                type: 'LineString',
-                coordinates: [[newLng, newLat, 0], [newLng, newLat, altitude]]
-              }
-            }
-          });
-
-          map.current.addLayer({
-            id: lineSourceId,
-            type: 'line',
-            source: lineSourceId,
-            paint: {
-              'line-color': uav.color,
-              'line-width': 2,
-              'line-opacity': 0.7
-            }
-          });
-        }
-
-        // Re-add UAV point
-        const pointSourceId = `uav-point-${uavId}`;
-        if (!map.current.getSource(pointSourceId)) {
-          map.current.addSource(pointSourceId, {
-            type: 'geojson',
-            data: {
-              type: 'Feature',
-              geometry: {
-                type: 'Point',
-                coordinates: [newLng, newLat, altitude]
-              }
-            }
-          });
-
-          map.current.addLayer({
-            id: pointSourceId,
-            type: 'circle',
-            source: pointSourceId,
-            paint: {
-              'circle-radius': selectedUavId === uavId ? 10 : 8,
-              'circle-color': uav.color,
-              'circle-stroke-width': 2,
-              'circle-stroke-color': '#ffffff',
-              'circle-opacity': 1
-            }
-          });
-
-          // Re-attach click handlers
-          map.current.on('click', pointSourceId, () => {
-            onSelectUav(uavId);
-          });
-
-          map.current.on('mouseenter', pointSourceId, () => {
-            map.current.getCanvas().style.cursor = 'pointer';
-          });
-
-          map.current.on('mouseleave', pointSourceId, () => {
-            map.current.getCanvas().style.cursor = '';
-          });
-        }
-      });
-    });
   };
 
   // Toggle 2D view (top-down bird's eye perspective)
@@ -788,7 +801,6 @@ function TerrainMap({ uavs, selectedUavId, selectedSwarm, onSelectUav, onMapClic
       const lngLat = map.current.unproject([x, y]);
       console.log('Overlay click detected:', lngLat);
       if (onMapClick) onMapClick(lngLat.lng, lngLat.lat);
-      setClickTarget({ lng: lngLat.lng, lat: lngLat.lat, timestamp: Date.now() });
     };
 
     if (isSelectingTarget || isSelectingOrigin) {
