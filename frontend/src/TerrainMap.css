@@ -98,6 +98,38 @@
   display: none !important;
 }
 
+/* Crosshair Cursor */
+.crosshair-cursor {
+  cursor: crosshair !important;
+}
+
+/* Cursor Coordinates Overlay */
+.cursor-coords-overlay {
+  position: absolute;
+  background: rgba(0, 0, 0, 0.7);
+  padding: 4px 8px;
+  border-radius: 4px;
+  z-index: 1000;
+  pointer-events: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-family: 'Orbitron', monospace;
+  font-size: 0.7rem;
+  white-space: nowrap;
+}
+
+.cursor-plus {
+  color: #00bfff;
+  font-size: 1rem;
+  font-weight: bold;
+}
+
+.cursor-coords-text {
+  color: #00bfff;
+  letter-spacing: 0.5px;
+}
+
 /* Responsive */
 @media (max-width: 768px) {
   .map-overlay-top-left {

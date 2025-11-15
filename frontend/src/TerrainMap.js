@@ -15,6 +15,8 @@ function TerrainMap({ uavs, selectedUavId, selectedSwarm, onSelectUav, onMapClic
   // Terrain style toggle
   const [showSatellite, setShowSatellite] = useState(true);
   const [clickTarget, setClickTarget] = useState(null);
+  const [cursorCoords, setCursorCoords] = useState(null);
+  const [cursorPixelPos, setCursorPixelPos] = useState(null);
 
   // Initialize map
   useEffect(() => {
@@ -126,6 +128,18 @@ function TerrainMap({ uavs, selectedUavId, selectedSwarm, onSelectUav, onMapClic
         onMapClick(e.lngLat.lng, e.lngLat.lat);
         setClickTarget({ lng: e.lngLat.lng, lat: e.lngLat.lat, timestamp: Date.now() });
       }
+    });
+
+    // Add mousemove handler for cursor coordinates
+    map.current.on('mousemove', (e) => {
+      setCursorCoords({
+        lng: e.lngLat.lng,
+        lat: e.lngLat.lat
+      });
+      setCursorPixelPos({
+        x: e.point.x,
+        y: e.point.y
+      });
     });
 
     map.current.on('error', (e) => {
@@ -715,7 +729,7 @@ function TerrainMap({ uavs, selectedUavId, selectedSwarm, onSelectUav, onMapClic
 
   return (
     <div className="terrain-map-container">
-      <div ref={mapContainer} className="map-container" />
+      <div ref={mapContainer} className="map-container crosshair-cursor" />
 
       {/* Map overlay with selected UAV info */}
       <div className="map-overlay-top-left">
@@ -732,6 +746,22 @@ function TerrainMap({ uavs, selectedUavId, selectedSwarm, onSelectUav, onMapClic
           </div>
         )}
       </div>
+
+      {/* Cursor coordinates display */}
+      {cursorCoords && cursorPixelPos && (
+        <div
+          className="cursor-coords-overlay"
+          style={{
+            left: `${cursorPixelPos.x + 15}px`,
+            top: `${cursorPixelPos.y - 30}px`
+          }}
+        >
+          <span className="cursor-plus">+</span>
+          <span className="cursor-coords-text">
+            {cursorCoords.lat.toFixed(4)}°, {cursorCoords.lng.toFixed(4)}°
+          </span>
+        </div>
+      )}
     </div>
   );
 }
