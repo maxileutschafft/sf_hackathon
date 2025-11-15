@@ -13,6 +13,8 @@ We are implementing multiple advanced features:
 6. 1km boundary visualization
 7. Pulsating target indicators
 8. Formation connection lines
+9. Cursor coordinate display (grey text)
+10. Waypoint navigation system
 
 ## Architecture
 - **Backend**: Node.js with WebSocket for real-time updates
@@ -27,3 +29,6 @@ We are implementing multiple advanced features:
 - Individual HORNET selection
 - Swarm-wide selection
 - Backend APIs for ROI and targets
+- **Goto command**: Absolute waypoint navigation
+- **Swarm movement**: Click map to move entire swarm
+- **Hexagonal formation**: 6 drones arrange in 30m radius hexagon at 50m altitude

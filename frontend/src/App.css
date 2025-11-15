@@ -589,3 +589,16 @@ body {
   flex-direction: column;
   gap: 4px;
 }
+
+/* Info Text */
+.info-text {
+  padding: 10px;
+  background: rgba(0, 191, 255, 0.1);
+  border-left: 3px solid var(--primary-cyan);
+  border-radius: 4px;
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+  font-family: 'Orbitron', sans-serif;
+  letter-spacing: 0.5px;
+  text-align: center;
+}

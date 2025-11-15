@@ -35,8 +35,8 @@ class UAVSimulator:
         
         # Physics constants
         self.gravity = -9.81  # m/s^2
-        self.max_velocity = 10.0  # m/s
-        self.acceleration = 2.0  # m/s^2
+        self.max_velocity = 33.33  # m/s (120 km/h)
+        self.acceleration = 5.0  # m/s^2 (increased for faster response)
         self.drag_coefficient = 0.5
         
         # Battery drain rate (% per second)
@@ -189,7 +189,23 @@ class UAVSimulator:
                 response['message'] = f'Rotating by {yaw_change}°'
             else:
                 response['message'] = 'Cannot rotate (not flying)'
-        
+
+        elif command == 'goto':
+            if self.status == 'flying':
+                x = params.get('x', self.position['x'])
+                y = params.get('y', self.position['y'])
+                z = params.get('z', self.position['z'])
+
+                self.target_position = {
+                    'x': x,
+                    'y': y,
+                    'z': max(0, z)
+                }
+                response['success'] = True
+                response['message'] = f'Going to position ({x}, {y}, {z})'
+            else:
+                response['message'] = 'Cannot goto (not flying)'
+
         else:
             response['message'] = f'Unknown command: {command}'
         

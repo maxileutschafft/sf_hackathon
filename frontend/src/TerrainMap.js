@@ -5,12 +5,12 @@ import './TerrainMap.css';
 
 mapboxgl.accessToken = process.env.REACT_APP_MAPBOX_TOKEN || 'pk.eyJ1IjoibWFwYm94IiwiYSI6ImNpejY4M29iazA2Z2gycXA4N2pmbDZmangifQ.-g_vE53SD2WrJ6tFX7QHmA';
 
-function TerrainMap({ uavs, selectedUavId, selectedSwarm, onSelectUav, onMapClick, rois, targets, onToggleStyleReady }) {
+function TerrainMap({ uavs, selectedUavId, selectedSwarm, onSelectUav, onMapClick, rois, targets, onToggleStyleReady, assemblyMode }) {
   const mapContainer = useRef(null);
   const map = useRef(null);
-  // Half Moon Bay Airport coordinates (base position)
-  const [lng] = useState(-122.5);
-  const [lat] = useState(37.513);
+  // Base position: lat 37.5139, lng -122.4961
+  const [lng] = useState(-122.4961);
+  const [lat] = useState(37.5139);
   const [zoom] = useState(13);
   // Terrain style toggle
   const [showSatellite, setShowSatellite] = useState(true);
@@ -496,28 +496,38 @@ function TerrainMap({ uavs, selectedUavId, selectedSwarm, onSelectUav, onMapClic
       const labelLayerId = `formation-label-layer-${swarmName}`;
 
       if (inFormation) {
-        // Draw lines between all hornets
-        const lines = [];
-        for (let i = 0; i < hornets.length; i++) {
-          for (let j = i + 1; j < hornets.length; j++) {
-            const h1 = hornets[i];
-            const h2 = hornets[j];
-            const lng1 = lng + (h1.position.y * metersToLng);
-            const lat1 = lat + (h1.position.x * metersToLat);
-            const lng2 = lng + (h2.position.y * metersToLng);
-            const lat2 = lat + (h2.position.x * metersToLat);
+        // Calculate center
+        const formationCenterX = positions.reduce((sum, p) => sum + p.x, 0) / positions.length;
+        const formationCenterY = positions.reduce((sum, p) => sum + p.y, 0) / positions.length;
+        const formationCenterZ = hornets.reduce((sum, h) => sum + h.position.z, 0) / hornets.length;
 
-            lines.push({
-              type: 'Feature',
-              geometry: {
-                type: 'LineString',
-                coordinates: [
-                  [lng1, lat1, h1.position.z],
-                  [lng2, lat2, h2.position.z]
-                ]
-              }
-            });
-          }
+        // Sort hornets by angle from center to form hexagon perimeter
+        const sortedHornets = hornets.map(h => {
+          const angle = Math.atan2(h.position.y - formationCenterY, h.position.x - formationCenterX);
+          return { ...h, angle };
+        }).sort((a, b) => a.angle - b.angle);
+
+        // Draw lines connecting adjacent drones in hexagon (perimeter only)
+        const lines = [];
+        for (let i = 0; i < sortedHornets.length; i++) {
+          const h1 = sortedHornets[i];
+          const h2 = sortedHornets[(i + 1) % sortedHornets.length]; // Connect to next, wrapping around
+
+          const lng1 = lng + (h1.position.y * metersToLng);
+          const lat1 = lat + (h1.position.x * metersToLat);
+          const lng2 = lng + (h2.position.y * metersToLng);
+          const lat2 = lat + (h2.position.x * metersToLat);
+
+          lines.push({
+            type: 'Feature',
+            geometry: {
+              type: 'LineString',
+              coordinates: [
+                [lng1, lat1, h1.position.z],
+                [lng2, lat2, h2.position.z]
+              ]
+            }
+          });
         }
 
         if (!map.current.getSource(sourceId)) {
@@ -529,14 +539,17 @@ function TerrainMap({ uavs, selectedUavId, selectedSwarm, onSelectUav, onMapClic
             }
           });
 
+          // Determine color based on swarm
+          const swarmColor = hornets[0]?.color || '#00bfff';
+
           map.current.addLayer({
             id: layerId,
             type: 'line',
             source: sourceId,
             paint: {
-              'line-color': '#00bfff',
-              'line-width': 2,
-              'line-opacity': 0.5
+              'line-color': swarmColor,
+              'line-width': 3,
+              'line-opacity': 0.8
             }
           });
         } else {
@@ -547,11 +560,8 @@ function TerrainMap({ uavs, selectedUavId, selectedSwarm, onSelectUav, onMapClic
         }
 
         // Add floating swarm label at center
-        const centerX = positions.reduce((sum, p) => sum + p.x, 0) / positions.length;
-        const centerY = positions.reduce((sum, p) => sum + p.y, 0) / positions.length;
-        const centerZ = hornets.reduce((sum, h) => sum + h.position.z, 0) / hornets.length;
-        const centerLng = lng + (centerY * metersToLng);
-        const centerLat = lat + (centerX * metersToLat);
+        const centerLng = lng + (formationCenterY * metersToLng);
+        const centerLat = lat + (formationCenterX * metersToLat);
 
         if (!map.current.getSource(labelSourceId)) {
           map.current.addSource(labelSourceId, {
@@ -561,7 +571,7 @@ function TerrainMap({ uavs, selectedUavId, selectedSwarm, onSelectUav, onMapClic
               properties: { name: swarmName },
               geometry: {
                 type: 'Point',
-                coordinates: [centerLng, centerLat, centerZ + 20]
+                coordinates: [centerLng, centerLat, formationCenterZ + 20]
               }
             }
           });
@@ -587,7 +597,7 @@ function TerrainMap({ uavs, selectedUavId, selectedSwarm, onSelectUav, onMapClic
             properties: { name: swarmName },
             geometry: {
               type: 'Point',
-              coordinates: [centerLng, centerLat, centerZ + 20]
+              coordinates: [centerLng, centerLat, formationCenterZ + 20]
             }
           });
         }
@@ -756,10 +766,21 @@ function TerrainMap({ uavs, selectedUavId, selectedSwarm, onSelectUav, onMapClic
             top: `${cursorPixelPos.y - 30}px`
           }}
         >
-          <span className="cursor-plus">+</span>
           <span className="cursor-coords-text">
             {cursorCoords.lat.toFixed(4)}°, {cursorCoords.lng.toFixed(4)}°
           </span>
+        </div>
+      )}
+
+      {/* Assembly mode indicator */}
+      {assemblyMode && (
+        <div className="assembly-mode-indicator">
+          <div className="assembly-text">
+            ASSEMBLY MODE: {assemblyMode}
+          </div>
+          <div className="assembly-subtext">
+            Click on map to set formation center
+          </div>
         </div>
       )}
     </div>

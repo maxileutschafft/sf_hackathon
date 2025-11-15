@@ -24,6 +24,7 @@ function App() {
   const [showControls, setShowControls] = useState(false);
   const [rois, setRois] = useState([]);
   const [targets, setTargets] = useState([]);
+  const [assemblyMode, setAssemblyMode] = useState(null); // null or swarmName waiting for center click
   const wsRef = useRef(null);
 
   useEffect(() => {
@@ -139,14 +140,77 @@ function App() {
     sendCommand('rotate', { yaw: angle });
   };
 
+  const handleAltitudePreset = async (altitude) => {
+    if (selectedSwarm) {
+      // Set altitude for entire swarm
+      const swarmDrones = Object.entries(uavs).filter(([_, uav]) => uav.swarm === selectedSwarm);
+      swarmDrones.forEach(([uavId, uav]) => {
+        const simulatorWs = wsRef.current;
+        if (simulatorWs && simulatorWs.readyState === WebSocket.OPEN) {
+          simulatorWs.send(JSON.stringify({
+            type: 'command',
+            command: 'goto',
+            params: { x: uav.position.x, y: uav.position.y, z: altitude },
+            uavId: uavId
+          }));
+        }
+      });
+      addLog(`${selectedSwarm} moving to ${altitude}m altitude`);
+    } else if (selectedUavId) {
+      // Set altitude for individual drone
+      const uav = uavs[selectedUavId];
+      sendCommand('goto', { x: uav.position.x, y: uav.position.y, z: altitude });
+      addLog(`${selectedUavId} moving to ${altitude}m altitude`);
+    }
+  };
+
+  const handleSwarmCommand = async (command) => {
+    if (!selectedSwarm) return;
+
+    const swarmDrones = Object.entries(uavs).filter(([_, uav]) => uav.swarm === selectedSwarm);
+
+    swarmDrones.forEach(([uavId]) => {
+      const simulatorWs = wsRef.current;
+      if (simulatorWs && simulatorWs.readyState === WebSocket.OPEN) {
+        const params = command === 'takeoff' ? { altitude: 20 } : {};
+        simulatorWs.send(JSON.stringify({
+          type: 'command',
+          command,
+          params,
+          uavId
+        }));
+      }
+    });
+
+    addLog(`${selectedSwarm}: ${command} command sent to all drones`);
+  };
+
   const handleMapClick = async (lng, lat) => {
-    const baseCoords = { lng: -122.5, lat: 37.513 };
+    const baseCoords = { lng: -122.4961, lat: 37.5139 };
     const metersToLng = 0.0001;
     const metersToLat = 0.0001;
 
     // Convert map coords to local meters
     const x = (lat - baseCoords.lat) / metersToLat;
     const y = (lng - baseCoords.lng) / metersToLng;
+
+    // Check if we're in assembly mode
+    if (assemblyMode) {
+      try {
+        const response = await fetch('http://localhost:3001/api/swarm-formation', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ swarmId: assemblyMode, formation: 'hexagon', centerX: x, centerY: y })
+        });
+        if (response.ok) {
+          addLog(`${assemblyMode} assembling at selected position`);
+        }
+      } catch (error) {
+        console.error('Error assembling swarm:', error);
+      }
+      setAssemblyMode(null); // Exit assembly mode
+      return;
+    }
 
     if (selectedSwarm) {
       // Move entire swarm
@@ -168,19 +232,9 @@ function App() {
     }
   };
 
-  const handleAssemble = async (swarmName) => {
-    try {
-      const response = await fetch('http://localhost:3001/api/swarm-formation', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ swarmId: swarmName, formation: 'hexagon' })
-      });
-      if (response.ok) {
-        addLog(`${swarmName} assembling into formation`);
-      }
-    } catch (error) {
-      console.error('Error assembling swarm:', error);
-    }
+  const handleAssemble = (swarmName) => {
+    setAssemblyMode(swarmName);
+    addLog(`Click on map to set assembly center for ${swarmName}`);
   };
 
   const handleSwarmClick = (swarmName) => {
@@ -237,6 +291,7 @@ function App() {
         rois={rois}
         targets={targets}
         onToggleStyleReady={setOnToggleStyle}
+        assemblyMode={assemblyMode}
       />
 
       {/* Top bar */}
@@ -344,130 +399,177 @@ function App() {
       </div>
 
       {/* Collapsible Controls Panel */}
-      {showControls && (
+      {showControls && (selectedUavId || selectedSwarm) && (
         <div className="controls-panel">
           <div className="panel-header">
-            <h2>Flight Controls - {selectedUav.id}</h2>
+            <h2>{selectedSwarm ? `Swarm Controls - ${selectedSwarm}` : `Flight Controls - ${selectedUav?.id}`}</h2>
             <button className="close-btn" onClick={() => setShowControls(false)}>✕</button>
           </div>
 
           <div className="panel-content">
-            {/* System Controls */}
-            <div className="control-group">
-              <h3>System</h3>
-              <div className="button-row">
-                <button
-                  onClick={handleArm}
-                  disabled={!connected || selectedUav.armed}
-                  className="btn btn-warning"
-                >
-                  ARM
-                </button>
-                <button
-                  onClick={handleDisarm}
-                  disabled={!connected || !selectedUav.armed}
-                  className="btn btn-danger"
-                >
-                  DISARM
-                </button>
-              </div>
-            </div>
+            {selectedSwarm ? (
+              // SWARM CONTROLS
+              <>
+                <div className="control-group">
+                  <h3>Swarm System</h3>
+                  <div className="button-row">
+                    <button
+                      onClick={() => handleSwarmCommand('arm')}
+                      disabled={!connected}
+                      className="btn btn-warning"
+                    >
+                      ARM ALL
+                    </button>
+                    <button
+                      onClick={() => handleSwarmCommand('disarm')}
+                      disabled={!connected}
+                      className="btn btn-danger"
+                    >
+                      DISARM ALL
+                    </button>
+                  </div>
+                </div>
 
-            <div className="control-group">
-              <h3>Flight Mode</h3>
-              <div className="button-row">
-                <button
-                  onClick={handleTakeoff}
-                  disabled={!connected || !selectedUav.armed || selectedUav.status === 'flying'}
-                  className="btn btn-success"
-                >
-                  TAKEOFF
-                </button>
-                <button
-                  onClick={handleLand}
-                  disabled={!connected || selectedUav.status !== 'flying'}
-                  className="btn btn-primary"
-                >
-                  LAND
-                </button>
-              </div>
-            </div>
+                <div className="control-group">
+                  <h3>Swarm Flight</h3>
+                  <div className="button-row">
+                    <button
+                      onClick={() => handleSwarmCommand('takeoff')}
+                      disabled={!connected}
+                      className="btn btn-success"
+                    >
+                      TAKEOFF ALL
+                    </button>
+                    <button
+                      onClick={() => handleSwarmCommand('land')}
+                      disabled={!connected}
+                      className="btn btn-primary"
+                    >
+                      LAND ALL
+                    </button>
+                  </div>
+                </div>
 
-            <div className="control-group">
-              <h3>Movement</h3>
-              <div className="movement-grid">
-                <div className="movement-row">
-                  <button
-                    onClick={() => handleMove('up')}
-                    disabled={!connected || selectedUav.status !== 'flying'}
-                    className="btn btn-control"
-                  >
-                    ⬆ UP
-                  </button>
+                <div className="control-group">
+                  <h3>Altitude Presets</h3>
+                  <div className="button-row">
+                    <button
+                      onClick={() => handleAltitudePreset(0)}
+                      disabled={!connected}
+                      className="btn btn-control"
+                    >
+                      GROUND (0m)
+                    </button>
+                  </div>
+                  <div className="button-row">
+                    <button
+                      onClick={() => handleAltitudePreset(20)}
+                      disabled={!connected}
+                      className="btn btn-control"
+                    >
+                      HOVER (20m)
+                    </button>
+                  </div>
+                  <div className="button-row">
+                    <button
+                      onClick={() => handleAltitudePreset(100)}
+                      disabled={!connected}
+                      className="btn btn-control"
+                    >
+                      RECON (100m)
+                    </button>
+                  </div>
                 </div>
-                <div className="movement-row">
-                  <button
-                    onClick={() => handleMove('forward')}
-                    disabled={!connected || selectedUav.status !== 'flying'}
-                    className="btn btn-control"
-                  >
-                    ⬆ FWD
-                  </button>
-                </div>
-                <div className="movement-row">
-                  <button
-                    onClick={() => handleMove('left')}
-                    disabled={!connected || selectedUav.status !== 'flying'}
-                    className="btn btn-control"
-                  >
-                    ⬅ LEFT
-                  </button>
-                  <button
-                    onClick={() => handleMove('down')}
-                    disabled={!connected || selectedUav.status !== 'flying'}
-                    className="btn btn-control"
-                  >
-                    ⬇ DOWN
-                  </button>
-                  <button
-                    onClick={() => handleMove('right')}
-                    disabled={!connected || selectedUav.status !== 'flying'}
-                    className="btn btn-control"
-                  >
-                    ➡ RIGHT
-                  </button>
-                </div>
-                <div className="movement-row">
-                  <button
-                    onClick={() => handleMove('backward')}
-                    disabled={!connected || selectedUav.status !== 'flying'}
-                    className="btn btn-control"
-                  >
-                    ⬇ BACK
-                  </button>
-                </div>
-              </div>
-            </div>
 
-            <div className="control-group">
-              <h3>Rotation</h3>
-              <div className="button-row">
-                <button
-                  onClick={() => handleRotate('ccw')}
-                  disabled={!connected || selectedUav.status !== 'flying'}
-                  className="btn btn-control"
-                >
-                  ↺ CCW
-                </button>
-                <button
-                  onClick={() => handleRotate('cw')}
-                  disabled={!connected || selectedUav.status !== 'flying'}
-                  className="btn btn-control"
-                >
-                  ↻ CW
-                </button>
-              </div>
-            </div>
+                <div className="control-group">
+                  <h3>Navigation</h3>
+                  <div className="info-text">
+                    Click on map to move swarm to location
+                  </div>
+                </div>
+              </>
+            ) : (
+              // INDIVIDUAL DRONE CONTROLS
+              <>
+                <div className="control-group">
+                  <h3>System</h3>
+                  <div className="button-row">
+                    <button
+                      onClick={handleArm}
+                      disabled={!connected || selectedUav?.armed}
+                      className="btn btn-warning"
+                    >
+                      ARM
+                    </button>
+                    <button
+                      onClick={handleDisarm}
+                      disabled={!connected || !selectedUav?.armed}
+                      className="btn btn-danger"
+                    >
+                      DISARM
+                    </button>
+                  </div>
+                </div>
+
+                <div className="control-group">
+                  <h3>Flight Mode</h3>
+                  <div className="button-row">
+                    <button
+                      onClick={handleTakeoff}
+                      disabled={!connected || !selectedUav?.armed || selectedUav?.status === 'flying'}
+                      className="btn btn-success"
+                    >
+                      TAKEOFF
+                    </button>
+                    <button
+                      onClick={handleLand}
+                      disabled={!connected || selectedUav?.status !== 'flying'}
+                      className="btn btn-primary"
+                    >
+                      LAND
+                    </button>
+                  </div>
+                </div>
+
+                <div className="control-group">
+                  <h3>Altitude Presets</h3>
+                  <div className="button-row">
+                    <button
+                      onClick={() => handleAltitudePreset(0)}
+                      disabled={!connected || !selectedUav}
+                      className="btn btn-control"
+                    >
+                      GROUND (0m)
+                    </button>
+                  </div>
+                  <div className="button-row">
+                    <button
+                      onClick={() => handleAltitudePreset(20)}
+                      disabled={!connected || !selectedUav}
+                      className="btn btn-control"
+                    >
+                      HOVER (20m)
+                    </button>
+                  </div>
+                  <div className="button-row">
+                    <button
+                      onClick={() => handleAltitudePreset(100)}
+                      disabled={!connected || !selectedUav}
+                      className="btn btn-control"
+                    >
+                      RECON (100m)
+                    </button>
+                  </div>
+                </div>
+
+                <div className="control-group">
+                  <h3>Navigation</h3>
+                  <div className="info-text">
+                    Click on map to move to location
+                  </div>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}
