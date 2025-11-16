@@ -329,6 +329,48 @@ function MissionPlanning({ onNavigateHome }) {
     setShowTrajectoryPanel(true);
   };
 
+  const handleSaveMission = async () => {
+    if (!waypointPayload || displayedTrajectories.length === 0) {
+      alert('Please plan a mission first before saving.');
+      return;
+    }
+
+    const missionName = prompt('Enter a name for this mission:', `Mission ${new Date().toLocaleString()}`);
+    
+    if (!missionName) {
+      return; // User cancelled
+    }
+
+    try {
+      const missionData = {
+        name: missionName,
+        origins: origins,
+        targets: targets,
+        jammers: jammers,
+        trajectories: displayedTrajectories,
+        waypointPayload: waypointPayload
+      };
+
+      const response = await fetch('http://localhost:3001/api/missions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(missionData)
+      });
+
+      if (response.ok) {
+        const result = await response.json();
+        logger.info('Mission saved:', result);
+        alert(`Mission "${missionName}" saved successfully!`);
+      } else {
+        const error = await response.json();
+        throw new Error(error.message || 'Failed to save mission');
+      }
+    } catch (error) {
+      logger.error('Error saving mission:', error);
+      alert(`Failed to save mission: ${error.message}`);
+    }
+  };
+
   return (
     <div className="mission-planning">
       <TerrainMap
@@ -438,6 +480,13 @@ function MissionPlanning({ onNavigateHome }) {
             disabled={isFetchingWaypoints}
           >
             {isFetchingWaypoints ? 'LOADING...' : 'SHOW TRAJECTORY'}
+          </button>
+          <button
+            className="topology-toggle-btn save-mission-btn"
+            onClick={handleSaveMission}
+            disabled={!waypointPayload || displayedTrajectories.length === 0}
+          >
+            💾 SAVE MISSION
           </button>
         </div>
 

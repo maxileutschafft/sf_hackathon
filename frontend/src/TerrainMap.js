@@ -23,6 +23,7 @@ function TerrainMap({ uavs, selectedUavId, selectedSwarm, onSelectUav, onMapClic
   const [clickTarget, setClickTarget] = useState(null);
   const [cursorCoords, setCursorCoords] = useState(null);
   const [cursorPixelPos, setCursorPixelPos] = useState(null);
+  const [mapReady, setMapReady] = useState(false);
 
   // Keep the ref updated with latest callback
   useEffect(() => {
@@ -152,6 +153,102 @@ function TerrainMap({ uavs, selectedUavId, selectedSwarm, onSelectUav, onMapClic
       }
 
       logger.debug('3D terrain and boundary added');
+      
+      // Add trajectories if available
+      if (trajectories && trajectories.length > 0) {
+        console.log('Adding trajectories on map load:', trajectories.length);
+        trajectories.forEach((traj, index) => {
+          const trajId = `trajectory-${index}`;
+          const waypoints = traj.waypoints || [];
+
+          if (waypoints.length < 2) {
+            console.warn(`Skipping trajectory ${index}: not enough waypoints`);
+            return;
+          }
+
+          // Convert waypoints to coordinates (2D only)
+          const coordinates = waypoints
+            .map(wp => {
+              if (wp.lat !== undefined && wp.lng !== undefined) {
+                return [wp.lng, wp.lat];
+              } else if (wp.x !== undefined && wp.y !== undefined) {
+                return [
+                  lng + (wp.y * METERS_TO_LNG),
+                  lat + (wp.x * METERS_TO_LAT)
+                ];
+              }
+              return null;
+            })
+            .filter(coord => coord !== null);
+
+          if (coordinates.length < 2) {
+            console.warn(`Skipping trajectory ${index}: not enough valid coordinates`);
+            return;
+          }
+
+          console.log(`Adding trajectory ${trajId} with ${coordinates.length} points`);
+
+          // Add source for the 2D line
+          map.current.addSource(trajId, {
+            type: 'geojson',
+            data: {
+              type: 'Feature',
+              geometry: {
+                type: 'LineString',
+                coordinates: coordinates
+              }
+            }
+          });
+
+          // Add line layer
+          map.current.addLayer({
+            id: trajId,
+            type: 'line',
+            source: trajId,
+            paint: {
+              'line-color': '#0099ff',
+              'line-width': 4,
+              'line-opacity': 0.9
+            }
+          });
+
+          // Add waypoint markers
+          const waypointSourceId = `${trajId}-waypoints`;
+          map.current.addSource(waypointSourceId, {
+            type: 'geojson',
+            data: {
+              type: 'FeatureCollection',
+              features: coordinates.map((coord, wpIndex) => ({
+                type: 'Feature',
+                geometry: {
+                  type: 'Point',
+                  coordinates: coord
+                },
+                properties: {
+                  index: wpIndex
+                }
+              }))
+            }
+          });
+
+          map.current.addLayer({
+            id: `${trajId}-waypoint-circles`,
+            type: 'circle',
+            source: waypointSourceId,
+            paint: {
+              'circle-radius': 5,
+              'circle-color': '#0099ff',
+              'circle-stroke-width': 2,
+              'circle-stroke-color': '#ffffff',
+              'circle-opacity': 0.95
+            }
+          });
+
+          console.log(`✓ Added trajectory ${trajId}`);
+        });
+      }
+      
+      setMapReady(true); // Signal that map is fully loaded
     });
 
     // Add map click handler
@@ -196,6 +293,142 @@ function TerrainMap({ uavs, selectedUavId, selectedSwarm, onSelectUav, onMapClic
       }
     };
   }, [lng, lat, zoom]);
+
+  // Update trajectories when they change (after map is loaded)
+  useEffect(() => {
+    if (!map.current || !mapReady) {
+      console.log('Trajectory update skipped - map not ready');
+      return;
+    }
+
+    console.log('=== UPDATING TRAJECTORIES ===');
+    console.log('Trajectories:', trajectories);
+
+    // Remove existing trajectory layers/sources
+    const style = map.current.getStyle();
+    if (style?.layers) {
+      const layersToRemove = [];
+      const sourcesToRemove = [];
+
+      style.layers.forEach(layer => {
+        if (layer.id.startsWith('trajectory-')) {
+          layersToRemove.push(layer.id);
+        }
+      });
+
+      layersToRemove.forEach(layerId => {
+        if (map.current.getLayer(layerId)) {
+          map.current.removeLayer(layerId);
+        }
+      });
+
+      Object.keys(style.sources).forEach(sourceId => {
+        if (sourceId.startsWith('trajectory-')) {
+          sourcesToRemove.push(sourceId);
+        }
+      });
+
+      sourcesToRemove.forEach(sourceId => {
+        if (map.current.getSource(sourceId)) {
+          map.current.removeSource(sourceId);
+        }
+      });
+    }
+
+    // Add new trajectories
+    if (trajectories && trajectories.length > 0) {
+      console.log('Adding', trajectories.length, 'trajectories');
+      trajectories.forEach((traj, index) => {
+        const trajId = `trajectory-${index}`;
+        const waypoints = traj.waypoints || [];
+
+        if (waypoints.length < 2) {
+          console.warn(`Skipping trajectory ${index}: not enough waypoints`);
+          return;
+        }
+
+        // Convert waypoints to coordinates (2D only)
+        const coordinates = waypoints
+          .map(wp => {
+            if (wp.lat !== undefined && wp.lng !== undefined) {
+              return [wp.lng, wp.lat];
+            } else if (wp.x !== undefined && wp.y !== undefined) {
+              return [
+                lng + (wp.y * METERS_TO_LNG),
+                lat + (wp.x * METERS_TO_LAT)
+              ];
+            }
+            return null;
+          })
+          .filter(coord => coord !== null);
+
+        if (coordinates.length < 2) {
+          console.warn(`Skipping trajectory ${index}: not enough valid coordinates`);
+          return;
+        }
+
+        console.log(`Adding trajectory ${trajId} with ${coordinates.length} points:`, coordinates);
+
+        // Add source for the 2D line
+        map.current.addSource(trajId, {
+          type: 'geojson',
+          data: {
+            type: 'Feature',
+            geometry: {
+              type: 'LineString',
+              coordinates: coordinates
+            }
+          }
+        });
+
+        // Add line layer
+        map.current.addLayer({
+          id: trajId,
+          type: 'line',
+          source: trajId,
+          paint: {
+            'line-color': '#0099ff',
+            'line-width': 4,
+            'line-opacity': 0.9
+          }
+        });
+
+        // Add waypoint markers
+        const waypointSourceId = `${trajId}-waypoints`;
+        map.current.addSource(waypointSourceId, {
+          type: 'geojson',
+          data: {
+            type: 'FeatureCollection',
+            features: coordinates.map((coord, wpIndex) => ({
+              type: 'Feature',
+              geometry: {
+                type: 'Point',
+                coordinates: coord
+              },
+              properties: {
+                index: wpIndex
+              }
+            }))
+          }
+        });
+
+        map.current.addLayer({
+          id: `${trajId}-waypoint-circles`,
+          type: 'circle',
+          source: waypointSourceId,
+          paint: {
+            'circle-radius': 5,
+            'circle-color': '#0099ff',
+            'circle-stroke-width': 2,
+            'circle-stroke-color': '#ffffff',
+            'circle-opacity': 0.95
+          }
+        });
+
+        console.log(`✓ Added trajectory ${trajId}`);
+      });
+    }
+  }, [trajectories, mapReady, lng, lat]);
 
   // Update UAV visualization (lines + points)
   useEffect(() => {
@@ -535,162 +768,6 @@ function TerrainMap({ uavs, selectedUavId, selectedSwarm, onSelectUav, onMapClic
       });
     }
   }, [clickTarget]);
-
-  // Trajectory visualization (planned paths)
-  useEffect(() => {
-    if (!map.current || !map.current.isStyleLoaded()) {
-      console.log('TRAJECTORY EFFECT: Map not ready', { mapExists: !!map.current, styleLoaded: map.current?.isStyleLoaded() });
-      return;
-    }
-
-    console.log('=== TRAJECTORY VISUALIZATION ===');
-    console.log('Trajectories:', trajectories?.length || 0, trajectories);
-
-    try {
-      // Remove existing trajectory layers/sources
-      const style = map.current.getStyle();
-      if (style?.layers) {
-        const layersToRemove = [];
-        const sourcesToRemove = [];
-
-        style.layers.forEach(layer => {
-          if (layer.id.startsWith('trajectory-')) {
-            layersToRemove.push(layer.id);
-          }
-        });
-
-        layersToRemove.forEach(layerId => {
-          if (map.current.getLayer(layerId)) {
-            map.current.removeLayer(layerId);
-            console.log('Removed layer:', layerId);
-          }
-        });
-
-        Object.keys(style.sources).forEach(sourceId => {
-          if (sourceId.startsWith('trajectory-')) {
-            sourcesToRemove.push(sourceId);
-          }
-        });
-
-        sourcesToRemove.forEach(sourceId => {
-          if (map.current.getSource(sourceId)) {
-            map.current.removeSource(sourceId);
-            console.log('Removed source:', sourceId);
-          }
-        });
-      }
-
-      // Add new trajectories
-      if (trajectories && trajectories.length > 0) {
-        console.log('Processing', trajectories.length, 'trajectories');
-        trajectories.forEach((traj, index) => {
-          console.log(`Processing trajectory ${index}:`, traj);
-          const trajId = `trajectory-${index}`;
-          const waypoints = traj.waypoints || [];
-
-          console.log(`Trajectory ${index} has ${waypoints.length} waypoints`);
-          
-          if (waypoints.length < 2) {
-            console.log(`Skipping trajectory ${index}: not enough waypoints`);
-            return;
-          }
-
-          // Convert waypoints to coordinates (2D only - drapes on terrain surface)
-          const coordinates = waypoints
-            .map(wp => {
-              if (wp.lat !== undefined && wp.lng !== undefined) {
-                // Use only lng/lat, no altitude - let it drape on terrain
-                return [wp.lng, wp.lat];
-              } else if (wp.x !== undefined && wp.y !== undefined) {
-                // Convert x/y offsets to lat/lng
-                return [
-                  lng + (wp.y * METERS_TO_LNG),
-                  lat + (wp.x * METERS_TO_LAT)
-                ];
-              }
-              return null;
-            })
-            .filter(coord => coord !== null);
-
-          console.log(`Trajectory ${index} converted to ${coordinates.length} coordinates (2D):`, coordinates);
-
-          if (coordinates.length < 2) {
-            console.log(`Skipping trajectory ${index}: not enough valid coordinates`);
-            return;
-          }
-
-          // Add source for the line
-          console.log(`Adding line source ${trajId}`);
-          map.current.addSource(trajId, {
-            type: 'geojson',
-            data: {
-              type: 'Feature',
-              geometry: {
-                type: 'LineString',
-                coordinates: coordinates
-              }
-            }
-          });
-
-          // Add line layer (using same technique as boundary box)
-          console.log(`Adding line layer ${trajId}`);
-          map.current.addLayer({
-            id: trajId,
-            type: 'line',
-            source: trajId,
-            paint: {
-              'line-color': '#00ffff',  // Cyan to distinguish from red boundary
-              'line-width': 4,
-              'line-opacity': 0.8
-            }
-          });
-
-          // Add waypoint markers (crosses/circles)
-          const waypointSourceId = `${trajId}-waypoints`;
-          console.log(`Adding waypoint markers ${waypointSourceId}`);
-          
-          map.current.addSource(waypointSourceId, {
-            type: 'geojson',
-            data: {
-              type: 'FeatureCollection',
-              features: coordinates.map((coord, wpIndex) => ({
-                type: 'Feature',
-                geometry: {
-                  type: 'Point',
-                  coordinates: coord
-                },
-                properties: {
-                  index: wpIndex
-                }
-              }))
-            }
-          });
-
-          // Add waypoint circle layer
-          map.current.addLayer({
-            id: `${trajId}-waypoint-circles`,
-            type: 'circle',
-            source: waypointSourceId,
-            paint: {
-              'circle-radius': 6,
-              'circle-color': '#00ffff',
-              'circle-stroke-width': 2,
-              'circle-stroke-color': '#ffffff',
-              'circle-opacity': 0.9
-            }
-          });
-
-          console.log(`✓ Added trajectory ${trajId} with ${coordinates.length} waypoints and markers`);
-        });
-      } else {
-        console.log('No trajectories to render');
-      }
-
-      console.log('=== TRAJECTORY RENDERING COMPLETE ===');
-    } catch (error) {
-      console.error('ERROR in trajectory visualization:', error);
-    }
-  }, [trajectories, lng, lat]);
 
   // Formation lines and swarm label
   useEffect(() => {

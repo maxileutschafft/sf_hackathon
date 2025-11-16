@@ -22,11 +22,11 @@ function Home({ onNavigate }) {
 
           <button 
             className="home-btn mission-control-btn"
-            onClick={() => onNavigate('control')}
+            onClick={() => onNavigate('select')}
           >
             <div className="btn-icon">🎮</div>
             <div className="btn-label">MISSION CONTROL</div>
-            <div className="btn-description">Real-time UAV control and monitoring</div>
+            <div className="btn-description">Select and execute missions</div>
           </button>
         </div>
       </div>

@@ -6,7 +6,7 @@ import { mapToSimulatorCoords, getHexagonalFormation } from './utils/coordinateU
 import { logger } from './utils/logger';
 import { PHYSICS, LOGGING } from './config/constants';
 
-function MissionControl({ onNavigateHome }) {
+function MissionControl({ onNavigateHome, missionData }) {
   const [connected, setConnected] = useState(false);
   const [uavs, setUavs] = useState({
     'HORNET-1': {
@@ -24,14 +24,80 @@ function MissionControl({ onNavigateHome }) {
   const [selectedUavId, setSelectedUavId] = useState(null);
   const [selectedSwarm, setSelectedSwarm] = useState(null);
   const [is2DView, setIs2DView] = useState(true); // Track current view mode
-  const [expandedSwarms, setExpandedSwarms] = useState({ 'SWARM-1': true, 'SWARM-2': true });
+  const [expandedSwarms, setExpandedSwarms] = useState({ 'SWARM-1': true });
   const [logs, setLogs] = useState([]);
   const [showControls, setShowControls] = useState(false);
   const [rois, setRois] = useState([]);
   const [targets, setTargets] = useState([]);
   const [assemblyMode, setAssemblyMode] = useState(null);
   const [currentWaypointIndex, setCurrentWaypointIndex] = useState({});
+  const [trajectories, setTrajectories] = useState([]);
+  const [missionJammers, setMissionJammers] = useState([]);
+  const [missionExecuting, setMissionExecuting] = useState(false);
+  const [missionInitialized, setMissionInitialized] = useState(false);
+  const [missionCompleted, setMissionCompleted] = useState(false);
+  const [showSuccessModal, setShowSuccessModal] = useState(false);
   const wsRef = useRef(null);
+
+  // Load mission data if provided
+  useEffect(() => {
+    if (missionData) {
+      logger.info('Loading mission data:', missionData);
+      
+      // Set targets from mission
+      if (missionData.targets) {
+        setTargets(missionData.targets.map(t => ({
+          id: t.id,
+          x: t.x,
+          y: t.y,
+          name: t.name
+        })));
+      }
+      
+      // Set trajectories from mission
+      if (missionData.trajectories) {
+        setTrajectories(missionData.trajectories);
+      }
+      
+      // Set jammers from mission
+      if (missionData.jammers) {
+        setMissionJammers(missionData.jammers);
+      }
+      
+      // Initialize drones at origin position
+      if (missionData.origins && missionData.origins.length > 0) {
+        logger.info('Mission origins loaded:', missionData.origins);
+        initializeDronesAtOrigin(missionData.origins[0]);
+      }
+    }
+  }, [missionData]);
+
+  const initializeDronesAtOrigin = async (origin) => {
+    try {
+      // Small formation radius around origin (10 meters)
+      const formationRadius = 10;
+      
+      const response = await fetch('http://localhost:3001/api/reset-positions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          centerX: origin.x,
+          centerY: origin.y,
+          radius: formationRadius
+        })
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        logger.info('Drones initialized at origin:', data);
+        setMissionInitialized(true);
+        addLog(`Drones initialized at origin: ${origin.name}`);
+      }
+    } catch (error) {
+      logger.error('Error initializing drones:', error);
+      addLog('Failed to initialize drones at origin', 'error');
+    }
+  };
 
   useEffect(() => {
     connectWebSocket();
@@ -355,6 +421,12 @@ function MissionControl({ onNavigateHome }) {
         const data = await response.json();
         addLog(data.message);
 
+        // Reset mission completion state
+        if (target === 'all') {
+          setMissionCompleted(false);
+          setMissionInitialized(false);
+        }
+
         // Reset waypoint index
         if (target === 'swarm' && selectedSwarm) {
           setCurrentWaypointIndex(prev => ({ ...prev, [selectedSwarm]: 0 }));
@@ -385,24 +457,149 @@ function MissionControl({ onNavigateHome }) {
     }
   };
 
+  const executeMission = async () => {
+    if (!missionData || !missionData.trajectories || missionData.trajectories.length === 0) {
+      addLog('No mission trajectories available', 'error');
+      return;
+    }
+
+    if (missionExecuting) {
+      addLog('Mission already executing', 'error');
+      return;
+    }
+
+    setMissionExecuting(true);
+    addLog('Starting mission execution...');
+
+    try {
+      // Get all UAVs in SWARM-1
+      const allUavIds = Object.keys(uavs).filter(id => uavs[id].swarm === 'SWARM-1');
+      
+      // Use first trajectory's waypoints as swarm center path
+      const waypointsPath = missionData.trajectories[0].waypoints || [];
+      
+      if (waypointsPath.length === 0) {
+        addLog('No waypoints in mission trajectory', 'error');
+        setMissionExecuting(false);
+        return;
+      }
+
+      addLog(`Mission has ${waypointsPath.length} waypoints`);
+
+      // Step 1: Arm all drones
+      addLog('Step 1: Arming all drones...');
+      for (const uavId of allUavIds) {
+        sendCommand('arm', {}, uavId);
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+      await new Promise(resolve => setTimeout(resolve, 1000));
+
+      // Step 2: Takeoff to formation altitude
+      const formationAltitude = 100; // meters
+      addLog(`Step 2: Taking off to ${formationAltitude}m...`);
+      for (const uavId of allUavIds) {
+        sendCommand('takeoff', { altitude: formationAltitude }, uavId);
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+      await new Promise(resolve => setTimeout(resolve, 5000)); // Wait for all to reach altitude
+
+      // Step 3: Move into hexagonal formation around first waypoint
+      const formationRadius = 30; // meters
+      addLog(`Step 3: Moving into formation (${formationRadius}m radius)...`);
+      
+      const firstWaypoint = waypointsPath[0];
+      let centerX, centerY;
+      
+      if (firstWaypoint.x !== undefined && firstWaypoint.y !== undefined) {
+        centerX = firstWaypoint.x;
+        centerY = firstWaypoint.y;
+      } else if (firstWaypoint.lat !== undefined && firstWaypoint.lng !== undefined) {
+        const coords = mapToSimulatorCoords(firstWaypoint.lng, firstWaypoint.lat);
+        centerX = coords.x;
+        centerY = coords.y;
+      }
+
+      const formationPositions = getHexagonalFormation(centerX, centerY, formationAltitude, formationRadius);
+      
+      for (let i = 0; i < allUavIds.length; i++) {
+        const uavId = allUavIds[i];
+        const pos = formationPositions[i];
+        sendCommand('goto', { x: pos.x, y: pos.y, z: pos.z }, uavId);
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+      
+      await new Promise(resolve => setTimeout(resolve, 3000)); // Wait to reach formation
+
+      // Step 4: Move swarm center through waypoints (maintaining formation)
+      // Gradually decrease altitude from 100m to 0m
+      addLog(`Step 4: Executing waypoint trajectory...`);
+      
+      for (let wpIndex = 1; wpIndex < waypointsPath.length; wpIndex++) {
+        const wp = waypointsPath[wpIndex];
+        
+        // Calculate altitude: linear descent from 100m at start to 0m at final waypoint
+        const progress = wpIndex / (waypointsPath.length - 1);
+        const altitude = formationAltitude * (1 - progress);
+        
+        let wpCenterX, wpCenterY;
+        if (wp.x !== undefined && wp.y !== undefined) {
+          wpCenterX = wp.x;
+          wpCenterY = wp.y;
+        } else if (wp.lat !== undefined && wp.lng !== undefined) {
+          const coords = mapToSimulatorCoords(wp.lng, wp.lat);
+          wpCenterX = coords.x;
+          wpCenterY = coords.y;
+        }
+
+        addLog(`Moving to waypoint ${wpIndex + 1}/${waypointsPath.length} (altitude: ${altitude.toFixed(1)}m)...`);
+        
+        // Calculate new formation positions around this waypoint
+        const newFormation = getHexagonalFormation(wpCenterX, wpCenterY, altitude, formationRadius);
+        
+        // Send all drones to their formation positions around new center
+        for (let i = 0; i < allUavIds.length; i++) {
+          const uavId = allUavIds[i];
+          const pos = newFormation[i];
+          sendCommand('goto', { x: pos.x, y: pos.y, z: pos.z }, uavId);
+          await new Promise(resolve => setTimeout(resolve, 50));
+        }
+        
+        // Wait for swarm to reach waypoint
+        await new Promise(resolve => setTimeout(resolve, 3000));
+      }
+
+      // Mission complete - land all drones
+      addLog('Landing all drones...');
+      for (const uavId of allUavIds) {
+        sendCommand('land', {}, uavId);
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+      
+      await new Promise(resolve => setTimeout(resolve, 2000));
+
+      addLog('Mission execution complete!');
+      setMissionCompleted(true);
+      setShowSuccessModal(true);
+    } catch (error) {
+      logger.error('Error executing mission:', error);
+      addLog(`Mission execution failed: ${error.message}`, 'error');
+    } finally {
+      setMissionExecuting(false);
+    }
+  };
+
   // Fetch swarm waypoints from backend
   const [swarmWaypoints, setSwarmWaypoints] = useState({});
 
   useEffect(() => {
-    // Fetch waypoints for both swarms
+    // Fetch waypoints for SWARM-1
     const fetchWaypoints = async () => {
       try {
-        const [swarm1Res, swarm2Res] = await Promise.all([
-          fetch('http://localhost:3001/api/waypoints/SWARM-1'),
-          fetch('http://localhost:3001/api/waypoints/SWARM-2')
-        ]);
-
+        const swarm1Res = await fetch('http://localhost:3001/api/waypoints/SWARM-1');
         const swarm1Data = await swarm1Res.json();
-        const swarm2Data = await swarm2Res.json();
 
         setSwarmWaypoints({
-          'SWARM-1': swarm1Data.waypoints || [],
-          'SWARM-2': swarm2Data.waypoints || []
+          'SWARM-1': swarm1Data.waypoints || []
         });
       } catch (error) {
         logger.error('Error fetching waypoints:', error);
@@ -449,6 +646,8 @@ function MissionControl({ onNavigateHome }) {
         onMapClick={handleMapClick}
         rois={rois}
         targets={targets}
+        trajectories={trajectories}
+        jammers={missionJammers}
         onToggleStyleReady={setOnToggleStyle}
         onToggle2DViewReady={setOnToggle2DView}
         assemblyMode={assemblyMode}
@@ -461,6 +660,30 @@ function MissionControl({ onNavigateHome }) {
         </button>
         <div style={{ flex: 1 }}>
         </div>
+        {missionData && (
+          <button
+            className="execute-mission-btn"
+            onClick={executeMission}
+            disabled={!connected || missionExecuting || !missionInitialized}
+            style={{
+              padding: '10px 24px',
+              marginRight: '15px',
+              background: missionExecuting ? 'rgba(255, 165, 0, 0.3)' : 'linear-gradient(135deg, #00ff88 0%, #00cc66 100%)',
+              border: 'none',
+              borderRadius: '6px',
+              color: missionExecuting ? '#ffa500' : '#0a0e27',
+              fontWeight: 'bold',
+              fontSize: '14px',
+              cursor: (!connected || missionExecuting || !missionInitialized) ? 'not-allowed' : 'pointer',
+              textTransform: 'uppercase',
+              letterSpacing: '1px',
+              boxShadow: missionExecuting ? 'none' : '0 4px 15px rgba(0, 255, 136, 0.4)',
+              opacity: (!connected || !missionInitialized) ? 0.5 : 1
+            }}
+          >
+            {missionExecuting ? '⏳ EXECUTING...' : '▶ EXECUTE MISSION'}
+          </button>
+        )}
         <div className={`connection-status ${connected ? 'connected' : 'disconnected'}`}>
           {connected ? '● CONNECTED' : '○ DISCONNECTED'}
         </div>
@@ -524,7 +747,9 @@ function MissionControl({ onNavigateHome }) {
               <span className="swarm-count">{hornets.length}</span>
             </div>
 
-            {expandedSwarms[swarmName] && hornets.map(([uavId, uav]) => (
+            {expandedSwarms[swarmName] && hornets
+              .filter(([uavId, uav]) => !missionCompleted || uav.status === 'idle') // Hide completed drones
+              .map(([uavId, uav]) => (
               <HornetCard
                 key={uavId}
                 uavId={uavId}
@@ -781,6 +1006,29 @@ function MissionControl({ onNavigateHome }) {
                 </div>
               </>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Mission Success Modal */}
+      {showSuccessModal && (
+        <div className="modal-overlay" onClick={() => setShowSuccessModal(false)}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2>🎉 Mission Success!</h2>
+            </div>
+            <div className="modal-body">
+              <p>The mission has been completed successfully.</p>
+              <p>All drones have landed safely at the final waypoint.</p>
+            </div>
+            <div className="modal-footer">
+              <button 
+                className="btn btn-primary" 
+                onClick={() => setShowSuccessModal(false)}
+              >
+                OK
+              </button>
+            </div>
           </div>
         </div>
       )}
