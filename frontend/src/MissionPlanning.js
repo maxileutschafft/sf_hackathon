@@ -206,7 +206,7 @@ function MissionPlanning({ onNavigateHome }) {
         lat: lat,
         x: x,
         y: y,
-        radius: 50, // Default radius in meters
+        radius: 200, // Default radius in meters
         createdAt: new Date().toISOString()
       };
 

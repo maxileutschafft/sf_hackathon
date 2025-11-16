@@ -627,7 +627,7 @@ function TerrainMap({ uavs, selectedUavId, selectedSwarm, onSelectUav, onMapClic
       jammers.forEach((jammer, index) => {
         const markerId = jammer.id || `jammer-${index}`;
         const [jammerLng, jammerLat] = convertPointToLngLat(jammer);
-        const radiusInMeters = jammer.radius || 50;
+        const radiusInMeters = jammer.radius || 200;
 
         const sourceId = `jammer-${markerId}`;
         const layerId = `jammer-circle-${markerId}`;
