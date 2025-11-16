@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import './App.css';
 import TerrainMap from './TerrainMap';
 
@@ -17,16 +17,22 @@ function MissionControl({ onNavigateHome }) {
       color: '#00bfff'
     }
   });
-  const [selectedUavId, setSelectedUavId] = useState('HORNET-1');
+  const [selectedUavId, setSelectedUavId] = useState(null);
   const [selectedSwarm, setSelectedSwarm] = useState(null);
+  const [is2DView, setIs2DView] = useState(true); // Track current view mode
+
+  // Debug: Log whenever selections change
+  useEffect(() => {
+    console.log('🔴 SELECTION STATE CHANGED:', { selectedUavId, selectedSwarm });
+  }, [selectedUavId, selectedSwarm]);
   const [expandedSwarms, setExpandedSwarms] = useState({ 'SWARM-1': true, 'SWARM-2': true });
   const [logs, setLogs] = useState([]);
   const [showControls, setShowControls] = useState(false);
   const [rois, setRois] = useState([]);
   const [targets, setTargets] = useState([]);
   const [assemblyMode, setAssemblyMode] = useState(null);
+  const [currentWaypointIndex, setCurrentWaypointIndex] = useState({});
   const wsRef = useRef(null);
-  const [onToggle2DView, setOnToggle2DView] = useState(null);
 
   useEffect(() => {
     connectWebSocket();
@@ -54,14 +60,16 @@ function MissionControl({ onNavigateHome }) {
         if (data.type === 'initial_state') {
           setUavs(data.data);
         } else if (data.type === 'state_update') {
-          const uavId = data.uavId || 'UAV-1';
-          setUavs(prev => ({
-            ...prev,
-            [uavId]: {
-              ...prev[uavId],
-              ...data.data
-            }
-          }));
+          const uavId = data.uavId;
+          if (uavId) {
+            setUavs(prev => ({
+              ...prev,
+              [uavId]: {
+                ...prev[uavId],
+                ...data.data
+              }
+            }));
+          }
         } else if (data.type === 'roi_update') {
           setRois(data.rois || []);
         } else if (data.type === 'target_update') {
@@ -91,159 +99,263 @@ function MissionControl({ onNavigateHome }) {
     wsRef.current = ws;
   };
 
-  const addLog = (message, type = 'info') => {
+  const addLog = useCallback((message, type = 'info') => {
     const timestamp = new Date().toLocaleTimeString();
     setLogs(prev => [...prev.slice(-49), { timestamp, message, type }]);
-  };
+  }, []);
 
-  const sendCommand = (command, params = {}, uavId = null) => {
-    const targetUavId = uavId || selectedUavId;
+  const sendCommand = useCallback((command, params = {}, uavId = null) => {
+    // CRITICAL: uavId parameter must be used, not selectedUavId fallback
+    if (!uavId) {
+      addLog('No UAV ID provided for command', 'error');
+      return;
+    }
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
       const commandData = {
         type: 'command',
         command,
         params,
-        uavId: targetUavId,
+        uavId: uavId,
         timestamp: Date.now()
       };
-      console.log('Sending command:', commandData);
       wsRef.current.send(JSON.stringify(commandData));
-      addLog(`[${targetUavId}] Sent command: ${command}`);
+      addLog(`[${uavId}] Sent command: ${command}`);
     } else {
       addLog('Not connected to server', 'error');
     }
-  };
+  }, [addLog]);
 
   const selectedUav = uavs[selectedUavId];
 
-  const handleArm = () => sendCommand('arm');
-  const handleDisarm = () => sendCommand('disarm');
-  const handleTakeoff = () => sendCommand('takeoff', { altitude: 10 });
-  const handleLand = () => sendCommand('land');
+  const handleArm = useCallback(() => {
+    if (!selectedUavId) return;
+    sendCommand('arm', {}, selectedUavId);
+  }, [sendCommand, selectedUavId]);
+  
+  const handleDisarm = useCallback(() => {
+    if (!selectedUavId) return;
+    sendCommand('disarm', {}, selectedUavId);
+  }, [sendCommand, selectedUavId]);
+  
+  const handleTakeoff = useCallback(() => {
+    if (!selectedUavId) return;
+    sendCommand('takeoff', { altitude: 10 }, selectedUavId);
+  }, [sendCommand, selectedUavId]);
+  
+  const handleLand = useCallback(() => {
+    if (!selectedUavId) return;
+    sendCommand('land', {}, selectedUavId);
+  }, [sendCommand, selectedUavId]);
 
-  const handleMove = (direction) => {
-    const moveParams = {
-      up: { dx: 0, dy: 0, dz: 5 },
-      down: { dx: 0, dy: 0, dz: -5 },
-      forward: { dx: 5, dy: 0, dz: 0 },
-      backward: { dx: -5, dy: 0, dz: 0 },
-      left: { dx: 0, dy: -5, dz: 0 },
-      right: { dx: 0, dy: 5, dz: 0 }
-    };
-    sendCommand('move', moveParams[direction]);
-  };
+  // Single, canonical move API
+  const moveSelectedUav = useCallback((x, y) => {
+    if (!selectedUavId) {
+      addLog('Select a UAV first', 'warning');
+      return;
+    }
 
-  const handleRotate = (direction) => {
-    const angle = direction === 'cw' ? 45 : -45;
-    sendCommand('rotate', { yaw: angle });
-  };
+    const currentUav = uavs[selectedUavId];
+    if (!currentUav) {
+      addLog('Selected UAV not found', 'error');
+      return;
+    }
 
-  const handleAltitudePreset = async (altitude) => {
+    // CRITICAL: Capture the UAV ID in a local variable to avoid closure issues
+    const targetUavId = selectedUavId;
+    const currentZ = typeof currentUav?.position?.z === 'number' ? currentUav.position.z : 0;
+    const targetZ = currentZ > 1 ? currentZ : 20; // auto takeoff altitude if on ground
+
+    if (currentUav.status !== 'flying') {
+      // Sequence: arm -> takeoff -> goto
+      // Use targetUavId consistently to avoid stale closure
+      sendCommand('arm', {}, targetUavId);
+      addLog(`[${targetUavId}] Arming`);
+      setTimeout(() => {
+        sendCommand('takeoff', { altitude: targetZ }, targetUavId);
+        addLog(`[${targetUavId}] Takeoff to ${targetZ}m`);
+      }, 200);
+      setTimeout(() => {
+        sendCommand('goto', { x, y, z: targetZ }, targetUavId);
+        addLog(`[${targetUavId}] Moving to (${x.toFixed(1)}, ${y.toFixed(1)}, ${targetZ.toFixed(1)})`);
+      }, 800);
+      return;
+    }
+
+    // Already flying, just move
+    sendCommand('goto', { x, y, z: targetZ }, targetUavId);
+    addLog(`[${targetUavId}] Moving to (${x.toFixed(1)}, ${y.toFixed(1)}, ${targetZ.toFixed(1)})`);
+  }, [selectedUavId, uavs, sendCommand, addLog]);
+
+  const handleAltitudePreset = useCallback(async (altitude) => {
     if (selectedSwarm) {
       const swarmDrones = Object.entries(uavs).filter(([_, uav]) => uav.swarm === selectedSwarm);
       swarmDrones.forEach(([uavId, uav]) => {
-        const simulatorWs = wsRef.current;
-        if (simulatorWs && simulatorWs.readyState === WebSocket.OPEN) {
-          simulatorWs.send(JSON.stringify({
-            type: 'command',
-            command: 'goto',
-            params: { x: uav.position.x, y: uav.position.y, z: altitude },
-            uavId: uavId
-          }));
+        if (uav && uav.position) {
+          sendCommand('goto', { x: uav.position.x, y: uav.position.y, z: altitude }, uavId);
         }
       });
       addLog(`${selectedSwarm} moving to ${altitude}m altitude`);
     } else if (selectedUavId) {
       const uav = uavs[selectedUavId];
-      console.log(`Setting altitude for ${selectedUavId} to ${altitude}m`);
-      sendCommand('goto', { x: uav.position.x, y: uav.position.y, z: altitude }, selectedUavId);
-      addLog(`${selectedUavId} moving to ${altitude}m altitude`);
+      if (uav && uav.position) {
+        sendCommand('goto', { x: uav.position.x, y: uav.position.y, z: altitude }, selectedUavId);
+      }
     }
-  };
+  }, [selectedSwarm, selectedUavId, uavs, sendCommand, addLog]);
 
-  const handleSwarmCommand = async (command) => {
+  const handleSwarmCommand = useCallback(async (command) => {
     if (!selectedSwarm) return;
 
     const swarmDrones = Object.entries(uavs).filter(([_, uav]) => uav.swarm === selectedSwarm);
+    const params = command === 'takeoff' ? { altitude: 20 } : {};
 
     swarmDrones.forEach(([uavId]) => {
-      const simulatorWs = wsRef.current;
-      if (simulatorWs && simulatorWs.readyState === WebSocket.OPEN) {
-        const params = command === 'takeoff' ? { altitude: 20 } : {};
-        simulatorWs.send(JSON.stringify({
-          type: 'command',
-          command,
-          params,
-          uavId
-        }));
-      }
+      sendCommand(command, params, uavId);
     });
 
     addLog(`${selectedSwarm}: ${command} command sent to all drones`);
-  };
+  }, [selectedSwarm, uavs, sendCommand, addLog]);
 
-  const handleMapClick = async (lng, lat) => {
-    const baseCoords = { lng: -122.4961, lat: 37.5139 };
+  const handleMapClick = useCallback((lng, lat) => {
     const metersToLng = 0.0001;
     const metersToLat = 0.0001;
+    const baseCoords = { lng: -122.4961, lat: 37.5139 };
 
+    // Convert map coordinates to simulator coordinates
     const x = (lat - baseCoords.lat) / metersToLat;
     const y = (lng - baseCoords.lng) / metersToLng;
 
-    console.log(`Map clicked: lng=${lng}, lat=${lat} -> x=${x}, y=${y}`);
-    console.log(`Selected UAV: ${selectedUavId}, Selected Swarm: ${selectedSwarm}`);
+    console.log('=== MAP CLICK DEBUG ===');
+    console.log('selectedUavId:', selectedUavId);
+    console.log('selectedSwarm:', selectedSwarm);
+    console.log('Target coords:', { x, y });
+    console.log('All UAVs:', Object.keys(uavs));
+    console.log('WARNING: If both selections are null, click handler was not called or state did not update!');
 
-    if (assemblyMode) {
-      try {
-        const response = await fetch('http://localhost:3001/api/swarm-formation', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ swarmId: assemblyMode, formation: 'hexagon', centerX: x, centerY: y })
-        });
-        if (response.ok) {
-          addLog(`${assemblyMode} assembling at selected position`);
-        }
-      } catch (error) {
-        console.error('Error assembling swarm:', error);
-      }
-      setAssemblyMode(null);
+    // If individual UAV selected, move just that UAV
+    if (selectedUavId) {
+      console.log('BRANCH: Moving individual UAV:', selectedUavId);
+      moveSelectedUav(x, y);
       return;
     }
 
+    // If swarm selected, move entire swarm in hexagonal formation
     if (selectedSwarm) {
-      try {
-        const response = await fetch('http://localhost:3001/api/swarm-target', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ swarmId: selectedSwarm, x, y, z: 50 })
-        });
-        if (response.ok) {
-          addLog(`${selectedSwarm} moving to target`);
-        }
-      } catch (error) {
-        console.error('Error moving swarm:', error);
-      }
-    } else if (selectedUavId) {
-      console.log(`Sending goto command to ${selectedUavId} with coords x=${x}, y=${y}, z=50`);
-      sendCommand('goto', { x, y, z: 50 }, selectedUavId);
-    }
-  };
+      console.log('BRANCH: Moving swarm:', selectedSwarm);
+      const swarmDrones = Object.entries(uavs).filter(([_, uav]) => {
+        console.log(`Checking ${_}: swarm=${uav.swarm}, match=${uav.swarm === selectedSwarm}`);
+        return uav.swarm === selectedSwarm;
+      });
+      console.log('Filtered swarm drones:', swarmDrones.map(([id]) => id));
+      const targetZ = 150; // Standard flight altitude
 
-  const handleAssemble = (swarmName) => {
+      if (swarmDrones.length === 0) {
+        console.error('NO DRONES FOUND FOR SWARM:', selectedSwarm);
+        addLog(`Error: No drones found for ${selectedSwarm}`, 'error');
+        return;
+      }
+
+      // Calculate hexagonal formation positions around the clicked center point
+      const FORMATION_RADIUS = 30; // meters, same as backend
+      const hexPositions = [];
+      for (let i = 0; i < 6; i++) {
+        const angle = (i * 60) * (Math.PI / 180); // 60 degrees between each
+        hexPositions.push({
+          x: x + FORMATION_RADIUS * Math.cos(angle),
+          y: y + FORMATION_RADIUS * Math.sin(angle)
+        });
+      }
+
+      console.log(`Sending commands to ${swarmDrones.length} drones in hexagonal formation`);
+      swarmDrones.forEach(([uavId, uav], index) => {
+        const currentZ = typeof uav?.position?.z === 'number' ? uav.position.z : 0;
+        const flightZ = currentZ > 1 ? currentZ : targetZ;
+
+        // Get position from hexagonal formation (use index to match formation)
+        const targetPos = hexPositions[index % hexPositions.length];
+        const targetX = targetPos.x;
+        const targetY = targetPos.y;
+
+        console.log(`[${index}] Processing ${uavId}: status=${uav.status}, z=${currentZ}, hex position=${index}`);
+
+        if (uav.status !== 'flying') {
+          // Arm and takeoff sequence
+          console.log(`  -> Arming and taking off ${uavId}`);
+          sendCommand('arm', {}, uavId);
+          setTimeout(() => {
+            console.log(`  -> Takeoff command for ${uavId}`);
+            sendCommand('takeoff', { altitude: flightZ }, uavId);
+          }, 200 + (index * 100)); // Stagger commands
+          setTimeout(() => {
+            console.log(`  -> Goto command for ${uavId} to hex position`);
+            sendCommand('goto', { x: targetX, y: targetY, z: flightZ }, uavId);
+          }, 800 + (index * 100));
+        } else {
+          // Already flying, just move to hex position
+          console.log(`  -> Moving ${uavId} directly to hex position`);
+          sendCommand('goto', { x: targetX, y: targetY, z: flightZ }, uavId);
+        }
+      });
+
+      addLog(`${selectedSwarm} moving ${swarmDrones.length} drones in formation to (${x.toFixed(1)}, ${y.toFixed(1)})`);
+      return;
+    }
+
+    console.log('BRANCH: No selection');
+    addLog('Select a UAV or swarm first', 'warning');
+  }, [selectedUavId, selectedSwarm, uavs, moveSelectedUav, sendCommand, addLog]);
+
+  const handleAssemble = useCallback((swarmName) => {
     setAssemblyMode(swarmName);
     addLog(`Click on map to set assembly center for ${swarmName}`);
-  };
+  }, [addLog]);
 
-  const handleSwarmClick = (swarmName) => {
-    setSelectedSwarm(swarmName);
+  const handleSwarmClick = useCallback((swarmName) => {
+    console.log('=== SWARM CLICK ===');
+    console.log('Clicking swarm:', swarmName);
+    console.log('Before - selectedSwarm:', selectedSwarm, 'selectedUavId:', selectedUavId);
+
+    // If the same swarm is clicked again, just toggle expansion
+    if (selectedSwarm === swarmName) {
+      console.log('Same swarm clicked - toggling expansion only');
+      setExpandedSwarms(prev => {
+        const newExpanded = { ...prev, [swarmName]: !prev[swarmName] };
+        console.log('New expanded state:', newExpanded);
+        return newExpanded;
+      });
+      return;
+    }
+
+    // Otherwise, clear UAV selection and set swarm
     setSelectedUavId(null);
-    setExpandedSwarms(prev => ({ ...prev, [swarmName]: !prev[swarmName] }));
-  };
+    setSelectedSwarm(swarmName);
+    setExpandedSwarms(prev => {
+      const newExpanded = { ...prev, [swarmName]: true }; // Always expand when selecting new swarm
+      console.log('New expanded state:', newExpanded);
+      return newExpanded;
+    });
 
-  const handleHornetClick = (uavId) => {
+    addLog(`Selected ${swarmName}`);
+    console.log('Called setSelectedSwarm with:', swarmName);
+  }, [selectedSwarm, selectedUavId, addLog]);
+
+  const handleHornetClick = useCallback((uavId) => {
+    console.log('=== HORNET CLICK ===');
+    console.log('Clicked UAV:', uavId);
+    console.log('Current selectedUavId:', selectedUavId);
+    console.log('Current selectedSwarm:', selectedSwarm);
+
+    // If the same UAV is clicked again, ignore
+    if (selectedUavId === uavId) {
+      console.log('Same UAV already selected');
+      return;
+    }
+
+    console.log('Setting selectedUavId to:', uavId);
     setSelectedUavId(uavId);
     setSelectedSwarm(null);
-  };
+    addLog(`Selected ${uavId}`);
+  }, [addLog, selectedSwarm, selectedUavId]);
 
   const handleAddROI = async () => {
     try {
@@ -275,7 +387,109 @@ function MissionControl({ onNavigateHome }) {
     }
   };
 
+  const handleResetPositions = async (target) => {
+    try {
+      const body = {};
+      if (target === 'uav' && selectedUavId) {
+        body.uavId = selectedUavId;
+      } else if (target === 'swarm' && selectedSwarm) {
+        body.swarmId = selectedSwarm;
+      }
+      // If target is 'all' or no specific selection, send empty body to reset all
+
+      const response = await fetch('http://localhost:3001/api/reset-positions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        addLog(data.message);
+
+        // Reset waypoint index
+        if (target === 'swarm' && selectedSwarm) {
+          setCurrentWaypointIndex(prev => ({ ...prev, [selectedSwarm]: 0 }));
+        }
+      }
+    } catch (error) {
+      console.error('Error resetting positions:', error);
+      addLog('Failed to reset positions', 'error');
+    }
+  };
+
+  const handleSwarmWaypoint = async (swarmId, waypointIndex) => {
+    try {
+      const response = await fetch('http://localhost:3001/api/swarm-waypoint', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ swarmId, waypointIndex })
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        addLog(data.message);
+        setCurrentWaypointIndex(prev => ({ ...prev, [swarmId]: waypointIndex }));
+      }
+    } catch (error) {
+      console.error('Error navigating to waypoint:', error);
+      addLog('Failed to navigate to waypoint', 'error');
+    }
+  };
+
+  // Fetch swarm waypoints from backend
+  const [swarmWaypoints, setSwarmWaypoints] = useState({});
+
+  useEffect(() => {
+    // Fetch waypoints for both swarms
+    const fetchWaypoints = async () => {
+      try {
+        const [swarm1Res, swarm2Res] = await Promise.all([
+          fetch('http://localhost:3001/api/waypoints/SWARM-1'),
+          fetch('http://localhost:3001/api/waypoints/SWARM-2')
+        ]);
+
+        const swarm1Data = await swarm1Res.json();
+        const swarm2Data = await swarm2Res.json();
+
+        setSwarmWaypoints({
+          'SWARM-1': swarm1Data.waypoints || [],
+          'SWARM-2': swarm2Data.waypoints || []
+        });
+      } catch (error) {
+        console.error('Error fetching waypoints:', error);
+      }
+    };
+
+    fetchWaypoints();
+  }, []);
+
+  const handleNextWaypoint = () => {
+    if (!selectedSwarm) return;
+
+    const waypoints = swarmWaypoints[selectedSwarm];
+    if (!waypoints || waypoints.length === 0) return;
+
+    const currentIndex = currentWaypointIndex[selectedSwarm] || 0;
+    const nextIndex = (currentIndex + 1) % waypoints.length;
+
+    handleSwarmWaypoint(selectedSwarm, nextIndex);
+  };
+
+  const handlePrevWaypoint = () => {
+    if (!selectedSwarm) return;
+
+    const waypoints = swarmWaypoints[selectedSwarm];
+    if (!waypoints || waypoints.length === 0) return;
+
+    const currentIndex = currentWaypointIndex[selectedSwarm] || 0;
+    const prevIndex = currentIndex === 0 ? waypoints.length - 1 : currentIndex - 1;
+
+    handleSwarmWaypoint(selectedSwarm, prevIndex);
+  };
+
   const [onToggleStyle, setOnToggleStyle] = useState(null);
+  const [onToggle2DView, setOnToggle2DView] = useState(null);
 
   return (
     <div className="App">
@@ -283,22 +497,21 @@ function MissionControl({ onNavigateHome }) {
         uavs={uavs}
         selectedUavId={selectedUavId}
         selectedSwarm={selectedSwarm}
-        onSelectUav={setSelectedUavId}
+        onSelectUav={handleHornetClick}
         onMapClick={handleMapClick}
         rois={rois}
         targets={targets}
         onToggleStyleReady={setOnToggleStyle}
         onToggle2DViewReady={setOnToggle2DView}
         assemblyMode={assemblyMode}
+        initialViewMode="2d"
       />
 
       <div className="top-bar">
         <button className="home-nav-btn" onClick={onNavigateHome}>
           ← HOME
         </button>
-        <div className="top-bar-center">
-          <h1>HIVE - MISSION CONTROL</h1>
-          <div className="subtitle">High-altitude Intelligence & Vigilance Ecosystem</div>
+        <div style={{ flex: 1 }}>
         </div>
         <div className={`connection-status ${connected ? 'connected' : 'disconnected'}`}>
           {connected ? '● CONNECTED' : '○ DISCONNECTED'}
@@ -307,29 +520,40 @@ function MissionControl({ onNavigateHome }) {
 
       <div className="left-sidebar">
         <div className="sidebar-header">
+          <div style={{
+            fontSize: '14px',
+            color: '#ffa500',
+            fontWeight: 'bold',
+            backgroundColor: 'rgba(0,0,0,0.5)',
+            padding: '8px 12px',
+            borderRadius: '4px',
+            marginBottom: '8px',
+            textAlign: 'center'
+          }}>
+            SELECTED: {selectedUavId || selectedSwarm || 'NONE'}
+          </div>
           <button
             className="topology-toggle-btn"
-            onClick={() => onToggleStyle && onToggleStyle()}
+            onClick={() => handleResetPositions('all')}
+            disabled={!connected}
+            style={{ backgroundColor: '#ff6b35' }}
           >
-            TOPOLOGY
+            ↺ RESET ALL
           </button>
           <button
             className="topology-toggle-btn"
-            onClick={() => onToggle2DView && onToggle2DView()}
+            onClick={() => {
+              if (onToggle2DView) {
+                onToggle2DView();
+                setIs2DView(!is2DView);
+              }
+            }}
           >
-            2D VIEW
+            {is2DView ? '3D VIEW' : '2D VIEW'}
           </button>
         </div>
 
-        <div className="map-tools-section">
-          <h4 className="section-title">MAP TOOLS</h4>
-          <button className="tool-btn" onClick={handleAddROI}>
-            + Add ROI
-          </button>
-          <button className="tool-btn" onClick={handleAddTarget}>
-            + Add Target
-          </button>
-        </div>
+
 
         {Object.entries(
           Object.entries(uavs).reduce((swarms, [uavId, uav]) => {
@@ -343,30 +567,25 @@ function MissionControl({ onNavigateHome }) {
             <div
               className={`swarm-header ${selectedSwarm === swarmName ? 'selected' : ''}`}
               onClick={(e) => {
-                if (!e.target.classList.contains('assemble-btn')) {
-                  handleSwarmClick(swarmName);
-                }
+                e.stopPropagation();
+                console.log('SWARM HEADER CLICKED:', swarmName);
+                handleSwarmClick(swarmName);
               }}
             >
               <span className="swarm-toggle">{expandedSwarms[swarmName] ? '▼' : '▶'}</span>
               <span className="swarm-name">{swarmName}</span>
               <span className="swarm-count">{hornets.length}</span>
-              <button
-                className="assemble-btn"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  handleAssemble(swarmName);
-                }}
-              >
-                ⬡ ASSEMBLE
-              </button>
             </div>
 
             {expandedSwarms[swarmName] && hornets.map(([uavId, uav]) => (
               <div
                 key={uavId}
                 className={`hornet-box ${selectedUavId === uavId ? 'selected' : ''}`}
-                onClick={() => handleHornetClick(uavId)}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  console.log('HORNET BOX CLICKED:', uavId);
+                  handleHornetClick(uavId);
+                }}
                 style={{ borderLeftColor: uav.color }}
               >
                 <div className="hornet-header">
@@ -465,20 +684,20 @@ function MissionControl({ onNavigateHome }) {
                   </div>
                   <div className="button-row">
                     <button
-                      onClick={() => handleAltitudePreset(20)}
-                      disabled={!connected}
-                      className="btn btn-control"
-                    >
-                      HOVER (20m)
-                    </button>
-                  </div>
-                  <div className="button-row">
-                    <button
                       onClick={() => handleAltitudePreset(100)}
                       disabled={!connected}
                       className="btn btn-control"
                     >
-                      RECON (100m)
+                      HOVER (100m)
+                    </button>
+                  </div>
+                  <div className="button-row">
+                    <button
+                      onClick={() => handleAltitudePreset(500)}
+                      disabled={!connected}
+                      className="btn btn-control"
+                    >
+                      RECON (500m)
                     </button>
                   </div>
                 </div>
@@ -487,6 +706,56 @@ function MissionControl({ onNavigateHome }) {
                   <h3>Navigation</h3>
                   <div className="info-text">
                     Click on map to move swarm to location
+                  </div>
+                </div>
+
+                <div className="control-group">
+                  <h3>Waypoint Navigation</h3>
+                  <div style={{
+                    backgroundColor: 'rgba(0,0,0,0.3)',
+                    padding: '8px',
+                    borderRadius: '4px',
+                    marginBottom: '8px',
+                    textAlign: 'center',
+                    fontSize: '14px',
+                    fontWeight: 'bold',
+                    color: '#00ff00'
+                  }}>
+                    Waypoint: {(currentWaypointIndex[selectedSwarm] || 0) + 1} / {
+                      swarmWaypoints[selectedSwarm]?.length || 0
+                    }
+                  </div>
+                  <div className="button-row">
+                    <button
+                      onClick={handlePrevWaypoint}
+                      disabled={!connected || !selectedSwarm}
+                      className="btn btn-control"
+                    >
+                      ◄ PREV
+                    </button>
+                    <button
+                      onClick={handleNextWaypoint}
+                      disabled={!connected || !selectedSwarm}
+                      className="btn btn-control"
+                    >
+                      NEXT ►
+                    </button>
+                  </div>
+                  <div className="info-text" style={{ marginTop: '8px', fontSize: '12px' }}>
+                    Swarm flies in hexagonal formation around waypoint center
+                  </div>
+                </div>
+
+                <div className="control-group">
+                  <h3>Reset</h3>
+                  <div className="button-row">
+                    <button
+                      onClick={() => handleResetPositions('swarm')}
+                      disabled={!connected || !selectedSwarm}
+                      className="btn btn-warning"
+                    >
+                      ↺ RESET SWARM POSITIONS
+                    </button>
                   </div>
                 </div>
               </>
@@ -545,20 +814,20 @@ function MissionControl({ onNavigateHome }) {
                   </div>
                   <div className="button-row">
                     <button
-                      onClick={() => handleAltitudePreset(20)}
-                      disabled={!connected || !selectedUav}
-                      className="btn btn-control"
-                    >
-                      HOVER (20m)
-                    </button>
-                  </div>
-                  <div className="button-row">
-                    <button
                       onClick={() => handleAltitudePreset(100)}
                       disabled={!connected || !selectedUav}
                       className="btn btn-control"
                     >
-                      RECON (100m)
+                      HOVER (100m)
+                    </button>
+                  </div>
+                  <div className="button-row">
+                    <button
+                      onClick={() => handleAltitudePreset(500)}
+                      disabled={!connected || !selectedUav}
+                      className="btn btn-control"
+                    >
+                      RECON (500m)
                     </button>
                   </div>
                 </div>
@@ -567,6 +836,19 @@ function MissionControl({ onNavigateHome }) {
                   <h3>Navigation</h3>
                   <div className="info-text">
                     Click on map to move to location
+                  </div>
+                </div>
+
+                <div className="control-group">
+                  <h3>Reset</h3>
+                  <div className="button-row">
+                    <button
+                      onClick={() => handleResetPositions('uav')}
+                      disabled={!connected || !selectedUavId}
+                      className="btn btn-warning"
+                    >
+                      ↺ RESET POSITION
+                    </button>
                   </div>
                 </div>
               </>

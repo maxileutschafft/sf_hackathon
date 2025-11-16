@@ -3,8 +3,6 @@ const http = require('http');
 const WebSocket = require('ws');
 const cors = require('cors');
 const bodyParser = require('body-parser');
-const fs = require('fs');
-const path = require('path');
 
 const app = express();
 const server = http.createServer(app);
@@ -21,24 +19,79 @@ const wssSimulator = new WebSocket.Server({ noServer: true });
 const clients = new Set();
 const simulatorConnections = new Map(); // Map of uavId -> websocket
 
+// Swarm waypoint lists - one list per swarm (center points)
+// Heights vary between 100-200m for visual interest
+const swarmWaypoints = {
+  'SWARM-1': [
+    { x: 0, y: 0, z: 0 },         // Waypoint 0: Home base
+    { x: 100, y: 0, z: 120 },     // Waypoint 1: Low cruise
+    { x: 200, y: 50, z: 180 },    // Waypoint 2: High altitude
+    { x: 200, y: 150, z: 150 },   // Waypoint 3: Mid altitude
+    { x: 100, y: 200, z: 200 },   // Waypoint 4: Maximum altitude
+    { x: 0, y: 200, z: 140 },     // Waypoint 5: Descending
+    { x: -100, y: 150, z: 170 },  // Waypoint 6: Climbing
+    { x: -100, y: 50, z: 130 },   // Waypoint 7: Low cruise
+    { x: 0, y: 100, z: 160 },     // Waypoint 8: Mid altitude
+    { x: 0, y: 0, z: 0 }          // Waypoint 9: Return home
+  ],
+  'SWARM-2': [
+    { x: -50, y: 50, z: 0 },      // Waypoint 0: Home base
+    { x: -150, y: 50, z: 140 },   // Waypoint 1: Low-mid cruise
+    { x: -250, y: 100, z: 190 },  // Waypoint 2: High altitude
+    { x: -250, y: 200, z: 160 },  // Waypoint 3: Descending
+    { x: -150, y: 250, z: 110 },  // Waypoint 4: Low cruise
+    { x: -50, y: 250, z: 175 },   // Waypoint 5: Climbing
+    { x: 50, y: 200, z: 200 },    // Waypoint 6: Maximum altitude
+    { x: 50, y: 100, z: 145 },    // Waypoint 7: Descending
+    { x: -50, y: 150, z: 125 },   // Waypoint 8: Low cruise
+    { x: -50, y: 50, z: 0 }       // Waypoint 9: Return home
+  ]
+};
+
+// Hexagonal formation radius
+const FORMATION_RADIUS = 30; // meters
+
+// Helper function: Calculate hexagonal positions around a center point
+function getHexagonalFormation(centerX, centerY, centerZ, radius = FORMATION_RADIUS) {
+  const positions = [];
+  for (let i = 0; i < 6; i++) {
+    const angle = (i * 60) * (Math.PI / 180); // 60 degrees between each
+    positions.push({
+      x: centerX + radius * Math.cos(angle),
+      y: centerY + radius * Math.sin(angle),
+      z: centerZ
+    });
+  }
+  return positions;
+}
+
+// Initialize SWARM-1 positions around their first waypoint
+const swarm1Center = swarmWaypoints['SWARM-1'][0];
+const swarm1Positions = getHexagonalFormation(swarm1Center.x, swarm1Center.y, swarm1Center.z);
+
+// Initialize SWARM-2 positions around their first waypoint
+const swarm2Center = swarmWaypoints['SWARM-2'][0];
+const swarm2Positions = getHexagonalFormation(swarm2Center.x, swarm2Center.y, swarm2Center.z);
+
 // HORNET states organized by SWARM (6 per swarm)
 // Base position: lat 37.5139, lng -122.4961 (converted to local XY = 0,0)
+// Initial positions are in hexagonal formation around swarm's first waypoint
 const uavStates = {
-  // SWARM-1 (Cyan/Blue tones) - Positioned in hexagon formation around base
-  'HORNET-1': { id: 'HORNET-1', swarm: 'SWARM-1', position: { x: 0, y: 0, z: 0 }, velocity: { x: 0, y: 0, z: 0 }, orientation: { pitch: 0, roll: 0, yaw: 0 }, battery: 100, status: 'idle', armed: false, color: '#00bfff' },
-  'HORNET-2': { id: 'HORNET-2', swarm: 'SWARM-1', position: { x: 10, y: 10, z: 0 }, velocity: { x: 0, y: 0, z: 0 }, orientation: { pitch: 0, roll: 0, yaw: 0 }, battery: 100, status: 'idle', armed: false, color: '#1e90ff' },
-  'HORNET-3': { id: 'HORNET-3', swarm: 'SWARM-1', position: { x: 20, y: 0, z: 0 }, velocity: { x: 0, y: 0, z: 0 }, orientation: { pitch: 0, roll: 0, yaw: 0 }, battery: 100, status: 'idle', armed: false, color: '#4169e1' },
-  'HORNET-4': { id: 'HORNET-4', swarm: 'SWARM-1', position: { x: 10, y: -10, z: 0 }, velocity: { x: 0, y: 0, z: 0 }, orientation: { pitch: 0, roll: 0, yaw: 0 }, battery: 100, status: 'idle', armed: false, color: '#6495ed' },
-  'HORNET-5': { id: 'HORNET-5', swarm: 'SWARM-1', position: { x: -10, y: -10, z: 0 }, velocity: { x: 0, y: 0, z: 0 }, orientation: { pitch: 0, roll: 0, yaw: 0 }, battery: 100, status: 'idle', armed: false, color: '#7b68ee' },
-  'HORNET-6': { id: 'HORNET-6', swarm: 'SWARM-1', position: { x: -10, y: 10, z: 0 }, velocity: { x: 0, y: 0, z: 0 }, orientation: { pitch: 0, roll: 0, yaw: 0 }, battery: 100, status: 'idle', armed: false, color: '#00ced1' },
+  // SWARM-1 (Cyan/Blue tones)
+  'HORNET-1': { id: 'HORNET-1', swarm: 'SWARM-1', formationIndex: 0, position: { ...swarm1Positions[0] }, velocity: { x: 0, y: 0, z: 0 }, orientation: { pitch: 0, roll: 0, yaw: 0 }, battery: 100, status: 'idle', armed: false, color: '#00bfff' },
+  'HORNET-2': { id: 'HORNET-2', swarm: 'SWARM-1', formationIndex: 1, position: { ...swarm1Positions[1] }, velocity: { x: 0, y: 0, z: 0 }, orientation: { pitch: 0, roll: 0, yaw: 0 }, battery: 100, status: 'idle', armed: false, color: '#1e90ff' },
+  'HORNET-3': { id: 'HORNET-3', swarm: 'SWARM-1', formationIndex: 2, position: { ...swarm1Positions[2] }, velocity: { x: 0, y: 0, z: 0 }, orientation: { pitch: 0, roll: 0, yaw: 0 }, battery: 100, status: 'idle', armed: false, color: '#4169e1' },
+  'HORNET-4': { id: 'HORNET-4', swarm: 'SWARM-1', formationIndex: 3, position: { ...swarm1Positions[3] }, velocity: { x: 0, y: 0, z: 0 }, orientation: { pitch: 0, roll: 0, yaw: 0 }, battery: 100, status: 'idle', armed: false, color: '#6495ed' },
+  'HORNET-5': { id: 'HORNET-5', swarm: 'SWARM-1', formationIndex: 4, position: { ...swarm1Positions[4] }, velocity: { x: 0, y: 0, z: 0 }, orientation: { pitch: 0, roll: 0, yaw: 0 }, battery: 100, status: 'idle', armed: false, color: '#7b68ee' },
+  'HORNET-6': { id: 'HORNET-6', swarm: 'SWARM-1', formationIndex: 5, position: { ...swarm1Positions[5] }, velocity: { x: 0, y: 0, z: 0 }, orientation: { pitch: 0, roll: 0, yaw: 0 }, battery: 100, status: 'idle', armed: false, color: '#00ced1' },
 
-  // SWARM-2 (Red/Orange tones) - Positioned slightly offset
-  'HORNET-7': { id: 'HORNET-7', swarm: 'SWARM-2', position: { x: -50, y: 50, z: 0 }, velocity: { x: 0, y: 0, z: 0 }, orientation: { pitch: 0, roll: 0, yaw: 0 }, battery: 100, status: 'idle', armed: false, color: '#ff0000' },
-  'HORNET-8': { id: 'HORNET-8', swarm: 'SWARM-2', position: { x: -40, y: 60, z: 0 }, velocity: { x: 0, y: 0, z: 0 }, orientation: { pitch: 0, roll: 0, yaw: 0 }, battery: 100, status: 'idle', armed: false, color: '#ff4500' },
-  'HORNET-9': { id: 'HORNET-9', swarm: 'SWARM-2', position: { x: -30, y: 50, z: 0 }, velocity: { x: 0, y: 0, z: 0 }, orientation: { pitch: 0, roll: 0, yaw: 0 }, battery: 100, status: 'idle', armed: false, color: '#ff6347' },
-  'HORNET-10': { id: 'HORNET-10', swarm: 'SWARM-2', position: { x: -40, y: 40, z: 0 }, velocity: { x: 0, y: 0, z: 0 }, orientation: { pitch: 0, roll: 0, yaw: 0 }, battery: 100, status: 'idle', armed: false, color: '#ff8c00' },
-  'HORNET-11': { id: 'HORNET-11', swarm: 'SWARM-2', position: { x: -60, y: 40, z: 0 }, velocity: { x: 0, y: 0, z: 0 }, orientation: { pitch: 0, roll: 0, yaw: 0 }, battery: 100, status: 'idle', armed: false, color: '#ffa500' },
-  'HORNET-12': { id: 'HORNET-12', swarm: 'SWARM-2', position: { x: -60, y: 60, z: 0 }, velocity: { x: 0, y: 0, z: 0 }, orientation: { pitch: 0, roll: 0, yaw: 0 }, battery: 100, status: 'idle', armed: false, color: '#ffA07a' }
+  // SWARM-2 (Red/Orange tones)
+  'HORNET-7': { id: 'HORNET-7', swarm: 'SWARM-2', formationIndex: 0, position: { ...swarm2Positions[0] }, velocity: { x: 0, y: 0, z: 0 }, orientation: { pitch: 0, roll: 0, yaw: 0 }, battery: 100, status: 'idle', armed: false, color: '#ff0000' },
+  'HORNET-8': { id: 'HORNET-8', swarm: 'SWARM-2', formationIndex: 1, position: { ...swarm2Positions[1] }, velocity: { x: 0, y: 0, z: 0 }, orientation: { pitch: 0, roll: 0, yaw: 0 }, battery: 100, status: 'idle', armed: false, color: '#ff4500' },
+  'HORNET-9': { id: 'HORNET-9', swarm: 'SWARM-2', formationIndex: 2, position: { ...swarm2Positions[2] }, velocity: { x: 0, y: 0, z: 0 }, orientation: { pitch: 0, roll: 0, yaw: 0 }, battery: 100, status: 'idle', armed: false, color: '#ff6347' },
+  'HORNET-10': { id: 'HORNET-10', swarm: 'SWARM-2', formationIndex: 3, position: { ...swarm2Positions[3] }, velocity: { x: 0, y: 0, z: 0 }, orientation: { pitch: 0, roll: 0, yaw: 0 }, battery: 100, status: 'idle', armed: false, color: '#ff8c00' },
+  'HORNET-11': { id: 'HORNET-11', swarm: 'SWARM-2', formationIndex: 4, position: { ...swarm2Positions[4] }, velocity: { x: 0, y: 0, z: 0 }, orientation: { pitch: 0, roll: 0, yaw: 0 }, battery: 100, status: 'idle', armed: false, color: '#ffa500' },
+  'HORNET-12': { id: 'HORNET-12', swarm: 'SWARM-2', formationIndex: 5, position: { ...swarm2Positions[5] }, velocity: { x: 0, y: 0, z: 0 }, orientation: { pitch: 0, roll: 0, yaw: 0 }, battery: 100, status: 'idle', armed: false, color: '#ffA07a' }
 };
 
 // Swarm targets for click-to-move
@@ -49,36 +102,6 @@ const regionsOfInterest = {};
 
 // Target markers
 const targetMarkers = {};
-
-// Mission planning parameters (persisted to file)
-const missionParamsFile = path.join(__dirname, 'mission_params.json');
-let missionParams = {
-  targets: [],
-  origins: [],
-  jammers: []
-};
-
-// Load mission parameters from file on startup
-try {
-  if (fs.existsSync(missionParamsFile)) {
-    const data = fs.readFileSync(missionParamsFile, 'utf8');
-    missionParams = JSON.parse(data);
-    console.log(`Loaded mission params: ${missionParams.targets?.length || 0} targets, ${missionParams.origins?.length || 0} origins, ${missionParams.jammers?.length || 0} jammers`);
-  }
-} catch (error) {
-  console.error('Error loading mission params:', error);
-  missionParams = { targets: [], origins: [], jammers: [] };
-}
-
-// Function to save mission parameters to file
-function saveMissionParams() {
-  try {
-    fs.writeFileSync(missionParamsFile, JSON.stringify(missionParams, null, 2));
-    console.log(`Saved mission params: ${missionParams.targets?.length || 0} targets, ${missionParams.origins?.length || 0} origins, ${missionParams.jammers?.length || 0} jammers`);
-  } catch (error) {
-    console.error('Error saving mission params:', error);
-  }
-}
 
 // WebSocket upgrade handling
 server.on('upgrade', (request, socket, head) => {
@@ -111,13 +134,21 @@ wssClients.on('connection', (ws) => {
   ws.on('message', (message) => {
     try {
       const data = JSON.parse(message);
-      console.log('Received from client:', data);
+      const uavId = data.uavId;
 
-      const uavId = data.uavId || 'UAV-1';
+      if (!uavId) {
+        ws.send(JSON.stringify({ type: 'error', message: 'Missing uavId in command' }));
+        return;
+      }
+
       const simulatorWs = simulatorConnections.get(uavId);
 
       // Forward command to specific UAV simulator
       if (simulatorWs && simulatorWs.readyState === WebSocket.OPEN) {
+        // minimal routing log
+        if (data.type === 'command') {
+          console.log(`Route cmd ${data.command} -> ${uavId}`);
+        }
         simulatorWs.send(JSON.stringify(data));
       } else {
         ws.send(JSON.stringify({
@@ -148,7 +179,6 @@ wssSimulator.on('connection', (ws, req) => {
   ws.on('message', (message) => {
     try {
       const data = JSON.parse(message);
-      console.log(`Received from simulator ${uavId}:`, data.type);
 
       // Update specific UAV state
       if (data.type === 'state_update' && uavStates[uavId]) {
@@ -167,6 +197,8 @@ wssSimulator.on('connection', (ws, req) => {
           }
         });
       } else {
+        // Log non-state messages
+        console.log(`Received from simulator ${uavId}:`, data.type);
         // Forward other messages (command responses) to clients
         const message = { ...data, uavId };
         clients.forEach((client) => {
@@ -197,7 +229,12 @@ app.get('/api/status', (req, res) => {
 
 app.post('/api/command', (req, res) => {
   const command = req.body;
-  const uavId = command.uavId || 'UAV-1';
+  const uavId = command.uavId;
+
+  if (!uavId) {
+    return res.status(400).json({ success: false, message: 'Missing uavId in command' });
+  }
+
   const simulatorWs = simulatorConnections.get(uavId);
 
   if (simulatorWs && simulatorWs.readyState === WebSocket.OPEN) {
@@ -325,36 +362,28 @@ app.post('/api/swarm-target', (req, res) => {
 
 // Swarm formation endpoint
 app.post('/api/swarm-formation', (req, res) => {
-  const { swarmId, formation, centerX, centerY } = req.body;
+  const { swarmId, formation, centerX, centerY, maintainAltitude } = req.body;
 
   // Get all HORNETs in the swarm
   const swarmHornets = Object.entries(uavStates)
     .filter(([_, uav]) => uav.swarm === swarmId)
-    .map(([id, _]) => id);
+    .map(([id, uav]) => ({ id, currentZ: uav.position.z }));
 
   if (swarmHornets.length === 0) {
     return res.status(404).json({ success: false, message: 'Swarm not found' });
   }
 
-  // Use provided center coordinates or calculate from current positions
-  let formationCenterX, formationCenterY, targetZ;
-
-  if (centerX !== undefined && centerY !== undefined) {
-    formationCenterX = centerX;
-    formationCenterY = centerY;
-    targetZ = 50; // Use standard formation altitude when assembling at specific location
+  // Use provided center coordinates
+  const formationCenterX = centerX;
+  const formationCenterY = centerY;
+  
+  // Determine target altitude
+  let targetZ;
+  if (maintainAltitude) {
+    // Use average current altitude of swarm
+    targetZ = swarmHornets.reduce((sum, h) => sum + h.currentZ, 0) / swarmHornets.length;
   } else {
-    // Calculate center from current positions
-    let sumX = 0, sumY = 0, sumZ = 0;
-    swarmHornets.forEach(uavId => {
-      const uav = uavStates[uavId];
-      sumX += uav.position.x;
-      sumY += uav.position.y;
-      sumZ += uav.position.z;
-    });
-    formationCenterX = sumX / swarmHornets.length;
-    formationCenterY = sumY / swarmHornets.length;
-    targetZ = Math.max(sumZ / swarmHornets.length, 50);
+    targetZ = 50; // Default formation altitude
   }
 
   if (formation === 'hexagon' && swarmHornets.length === 6) {
@@ -373,8 +402,8 @@ app.post('/api/swarm-formation', (req, res) => {
     }
 
     // Send goto commands to each HORNET
-    swarmHornets.forEach((uavId, index) => {
-      const simulatorWs = simulatorConnections.get(uavId);
+    swarmHornets.forEach((hornet, index) => {
+      const simulatorWs = simulatorConnections.get(hornet.id);
       if (simulatorWs && simulatorWs.readyState === WebSocket.OPEN) {
         simulatorWs.send(JSON.stringify({
           type: 'command',
@@ -398,23 +427,160 @@ app.post('/api/swarm-formation', (req, res) => {
   }
 });
 
-// Mission Planning Parameters endpoints
-app.get('/api/mission-params', (req, res) => {
-  res.json(missionParams);
+// Reset positions endpoint - resets drones to their hexagonal formation around first waypoint
+app.post('/api/reset-positions', (req, res) => {
+  const { uavId, swarmId } = req.body;
+
+  let resetCount = 0;
+
+  // Reset specific UAV to its formation position
+  if (uavId && uavStates[uavId]) {
+    const uav = uavStates[uavId];
+    const swarm = uav.swarm;
+    const formationIndex = uav.formationIndex;
+    const centerWaypoint = swarmWaypoints[swarm][0];
+    const formationPositions = getHexagonalFormation(centerWaypoint.x, centerWaypoint.y, centerWaypoint.z);
+    const targetPosition = formationPositions[formationIndex];
+
+    const simulatorWs = simulatorConnections.get(uavId);
+    if (simulatorWs && simulatorWs.readyState === WebSocket.OPEN) {
+      simulatorWs.send(JSON.stringify({
+        type: 'command',
+        command: 'goto',
+        params: targetPosition
+      }));
+      resetCount++;
+    }
+  }
+  // Reset entire swarm to hexagonal formation around first waypoint
+  else if (swarmId && swarmWaypoints[swarmId]) {
+    const centerWaypoint = swarmWaypoints[swarmId][0];
+    const formationPositions = getHexagonalFormation(centerWaypoint.x, centerWaypoint.y, centerWaypoint.z);
+
+    Object.entries(uavStates).forEach(([id, uav]) => {
+      if (uav.swarm === swarmId) {
+        const targetPosition = formationPositions[uav.formationIndex];
+        const simulatorWs = simulatorConnections.get(id);
+
+        if (simulatorWs && simulatorWs.readyState === WebSocket.OPEN) {
+          simulatorWs.send(JSON.stringify({
+            type: 'command',
+            command: 'goto',
+            params: targetPosition
+          }));
+          resetCount++;
+        }
+      }
+    });
+  }
+  // Reset all drones to their respective swarm formations
+  else {
+    // Reset SWARM-1
+    const swarm1Center = swarmWaypoints['SWARM-1'][0];
+    const swarm1Positions = getHexagonalFormation(swarm1Center.x, swarm1Center.y, swarm1Center.z);
+
+    // Reset SWARM-2
+    const swarm2Center = swarmWaypoints['SWARM-2'][0];
+    const swarm2Positions = getHexagonalFormation(swarm2Center.x, swarm2Center.y, swarm2Center.z);
+
+    Object.entries(uavStates).forEach(([id, uav]) => {
+      const formationPositions = uav.swarm === 'SWARM-1' ? swarm1Positions : swarm2Positions;
+      const targetPosition = formationPositions[uav.formationIndex];
+      const simulatorWs = simulatorConnections.get(id);
+
+      if (simulatorWs && simulatorWs.readyState === WebSocket.OPEN) {
+        simulatorWs.send(JSON.stringify({
+          type: 'command',
+          command: 'goto',
+          params: targetPosition
+        }));
+        resetCount++;
+      }
+    });
+  }
+
+  res.json({
+    success: true,
+    message: `Reset ${resetCount} drone(s) to initial positions`,
+    resetCount
+  });
 });
 
-app.post('/api/mission-params', (req, res) => {
-  const { targets, origins, jammers } = req.body;
-  missionParams.targets = targets || [];
-  missionParams.origins = origins || [];
-  missionParams.jammers = jammers || [];
-  saveMissionParams();
-  res.json({ success: true, ...missionParams });
+// Get waypoints for a specific swarm
+app.get('/api/waypoints/:swarmId', (req, res) => {
+  const { swarmId } = req.params;
+
+  if (swarmWaypoints[swarmId]) {
+    res.json({
+      success: true,
+      swarmId,
+      waypoints: swarmWaypoints[swarmId]
+    });
+  } else {
+    res.status(404).json({
+      success: false,
+      message: `No waypoints found for ${swarmId}`
+    });
+  }
 });
 
-// Legacy endpoint for backward compatibility
-app.get('/api/mission-targets', (req, res) => {
-  res.json({ targets: missionParams.targets });
+// Execute waypoint navigation for swarm with hexagonal formation
+app.post('/api/swarm-waypoint', (req, res) => {
+  const { swarmId, waypointIndex } = req.body;
+
+  if (!swarmId || !swarmWaypoints[swarmId]) {
+    return res.status(400).json({ success: false, message: 'Invalid or missing swarmId' });
+  }
+
+  const waypoints = swarmWaypoints[swarmId];
+  if (waypointIndex < 0 || waypointIndex >= waypoints.length) {
+    return res.status(400).json({
+      success: false,
+      message: `Invalid waypoint index. Valid range: 0-${waypoints.length - 1}`
+    });
+  }
+
+  // Get all drones in the swarm
+  const swarmDrones = Object.entries(uavStates)
+    .filter(([_, uav]) => uav.swarm === swarmId)
+    .sort(([_, a], [__, b]) => a.formationIndex - b.formationIndex);
+
+  if (swarmDrones.length !== 6) {
+    return res.status(400).json({
+      success: false,
+      message: `Swarm must have exactly 6 drones for hexagonal formation (has ${swarmDrones.length})`
+    });
+  }
+
+  // Get the center waypoint for the swarm
+  const centerWaypoint = waypoints[waypointIndex];
+
+  // Calculate hexagonal formation positions around the center waypoint
+  const formationPositions = getHexagonalFormation(centerWaypoint.x, centerWaypoint.y, centerWaypoint.z);
+
+  // Send goto commands to each drone maintaining their formation index
+  let commandCount = 0;
+  swarmDrones.forEach(([droneId, uav]) => {
+    const targetPosition = formationPositions[uav.formationIndex];
+    const simulatorWs = simulatorConnections.get(droneId);
+
+    if (simulatorWs && simulatorWs.readyState === WebSocket.OPEN) {
+      simulatorWs.send(JSON.stringify({
+        type: 'command',
+        command: 'goto',
+        params: targetPosition
+      }));
+      commandCount++;
+    }
+  });
+
+  res.json({
+    success: true,
+    message: `${swarmId} navigating to waypoint ${waypointIndex} in hexagonal formation`,
+    center: centerWaypoint,
+    formation: formationPositions,
+    commandsSent: commandCount
+  });
 });
 
 // Start server

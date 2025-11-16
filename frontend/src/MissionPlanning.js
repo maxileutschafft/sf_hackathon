@@ -5,6 +5,7 @@ import TerrainMap from './TerrainMap';
 function MissionPlanning({ onNavigateHome }) {
   const [onToggleStyle, setOnToggleStyle] = useState(null);
   const [onToggle2DView, setOnToggle2DView] = useState(null);
+  const [is2DView, setIs2DView] = useState(true); // Track current view mode
   const [isSelectingTarget, setIsSelectingTarget] = useState(false);
   const [isSelectingOrigin, setIsSelectingOrigin] = useState(false);
   const [isSelectingJammer, setIsSelectingJammer] = useState(false);
@@ -277,29 +278,41 @@ function MissionPlanning({ onNavigateHome }) {
         onToggleStyleReady={setOnToggleStyle}
         onToggle2DViewReady={setOnToggle2DView}
         assemblyMode={null}
+        initialViewMode="2d"
       />
 
       <div className="planning-top-bar">
         <button className="home-nav-btn" onClick={onNavigateHome}>
           ← HOME
         </button>
-        <h1>HIVE - MISSION PLANNING</h1>
-        <div className="subtitle">Design and Plan Mission Routes</div>
+        <h1>
+          <div className="hive-title">
+            <span className="hive-letter">S</span>
+            <span className="hive-word">warm</span>
+            <span className="hive-letter">T</span>
+            <span className="hive-word">actical</span>
+            <span className="hive-letter">I</span>
+            <span className="hive-word">ntelligence &</span>
+            <span className="hive-letter">N</span>
+            <span className="hive-word">avigation</span>
+            <span className="hive-letter">G</span>
+            <span className="hive-word">rid</span>
+          </div>
+        </h1>
       </div>
 
       <div className="planning-sidebar">
         <div className="sidebar-header">
           <button
             className="topology-toggle-btn"
-            onClick={() => onToggleStyle && onToggleStyle()}
+            onClick={() => {
+              if (onToggle2DView) {
+                onToggle2DView();
+                setIs2DView(!is2DView);
+              }
+            }}
           >
-            TOPOLOGY
-          </button>
-          <button
-            className="topology-toggle-btn"
-            onClick={() => onToggle2DView && onToggle2DView()}
-          >
-            2D VIEW
+            {is2DView ? '3D VIEW' : '2D VIEW'}
           </button>
           <button
             className={`topology-toggle-btn ${isSelectingTarget ? 'active-selection' : ''}`}

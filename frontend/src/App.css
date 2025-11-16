@@ -46,16 +46,25 @@ body {
   padding: 0 30px;
   z-index: 1000;
   box-shadow: 0 4px 20px rgba(0, 191, 255, 0.1);
+  position: relative;
+  overflow: hidden;
 }
 
-.top-bar-center {
+/* Honeycomb pattern overlay */
+.top-bar::before {
+  content: '';
   position: absolute;
-  left: 50%;
-  top: 50%;
-  transform: translate(-50%, -50%);
-  text-align: center;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-image: 
+    linear-gradient(30deg, transparent 48%, rgba(0, 191, 255, 0.05) 49%, rgba(0, 191, 255, 0.05) 51%, transparent 52%),
+    linear-gradient(150deg, transparent 48%, rgba(0, 191, 255, 0.05) 49%, rgba(0, 191, 255, 0.05) 51%, transparent 52%),
+    linear-gradient(90deg, transparent 48%, rgba(0, 191, 255, 0.05) 49%, rgba(0, 191, 255, 0.05) 51%, transparent 52%);
+  background-size: 40px 70px;
+  opacity: 0.3;
   pointer-events: none;
-  z-index: 1;
 }
 
 .top-bar h1 {
@@ -64,25 +73,77 @@ body {
   letter-spacing: 4px;
   color: var(--primary-cyan);
   text-shadow: 0 0 20px rgba(0, 191, 255, 0.5);
-  margin: 0;
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
-.top-bar-center .subtitle {
+/* Home navigation button */
+.home-nav-btn {
+  padding: 8px 16px;
+  background: rgba(0, 191, 255, 0.1);
+  border: 2px solid var(--primary-cyan);
+  border-radius: 6px;
+  color: var(--primary-cyan);
+  font-family: 'Orbitron', sans-serif;
+  font-weight: bold;
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: all 0.3s;
+  letter-spacing: 1px;
+  position: relative;
+  z-index: 1;
+}
+
+.home-nav-btn:hover {
+  background: rgba(0, 191, 255, 0.2);
+  box-shadow: 0 0 15px rgba(0, 191, 255, 0.4);
+  transform: translateX(-3px);
+}
+
+/* STING acronym styling */
+.hive-title {
+  display: flex;
+  align-items: baseline;
+  gap: 3px;
+}
+
+.hive-letter {
+  font-size: 2.2rem;
+  font-weight: 900;
+  color: var(--primary-cyan);
+  text-shadow: 0 0 25px rgba(0, 191, 255, 0.6);
+  position: relative;
+}
+
+.hive-word {
+  font-size: 0.5rem;
+  color: var(--text-secondary);
+  font-weight: 400;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  margin: 0 2px;
+  opacity: 0.8;
+}
+
+.subtitle {
+  flex: 1;
   font-size: 0.65rem;
   color: var(--text-secondary);
   text-align: center;
   letter-spacing: 1px;
   text-transform: uppercase;
-  margin-top: 2px;
-}
-
-.subtitle {
-  flex: 1;
 }
 
 .connection-status {
-  z-index: unset;
-  position: unset;
+  font-size: 0.85rem;
+  font-weight: bold;
+  padding: 8px 16px;
+  border-radius: 4px;
+  border: 2px solid;
+  letter-spacing: 2px;
 }
 
 .connection-status.connected {
@@ -111,13 +172,36 @@ body {
   z-index: 900;
   overflow-y: auto;
   padding: 10px;
+  position: relative;
+}
+
+/* Honeycomb pattern for sidebar */
+.left-sidebar::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-image: 
+    linear-gradient(30deg, transparent 48%, rgba(0, 191, 255, 0.03) 49%, rgba(0, 191, 255, 0.03) 51%, transparent 52%),
+    linear-gradient(150deg, transparent 48%, rgba(0, 191, 255, 0.03) 49%, rgba(0, 191, 255, 0.03) 51%, transparent 52%),
+    linear-gradient(90deg, transparent 48%, rgba(0, 191, 255, 0.03) 49%, rgba(0, 191, 255, 0.03) 51%, transparent 52%);
+  background-size: 30px 52px;
+  opacity: 0.5;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.sidebar-header,
+.map-tools-section,
+.swarm-group {
+  position: relative;
+  z-index: 1;
 }
 
 .sidebar-header {
   margin-bottom: 15px;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
 }
 
 .topology-toggle-btn {
@@ -133,6 +217,29 @@ body {
   cursor: pointer;
   transition: all 0.3s;
   letter-spacing: 2px;
+  position: relative;
+  overflow: hidden;
+}
+
+/* Honeycomb hover effect */
+.topology-toggle-btn::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-image: 
+    linear-gradient(30deg, transparent 48%, rgba(0, 191, 255, 0.1) 49%, rgba(0, 191, 255, 0.1) 51%, transparent 52%),
+    linear-gradient(150deg, transparent 48%, rgba(0, 191, 255, 0.1) 49%, rgba(0, 191, 255, 0.1) 51%, transparent 52%),
+    linear-gradient(90deg, transparent 48%, rgba(0, 191, 255, 0.1) 49%, rgba(0, 191, 255, 0.1) 51%, transparent 52%);
+  background-size: 20px 35px;
+  opacity: 0;
+  transition: opacity 0.3s;
+}
+
+.topology-toggle-btn:hover::before {
+  opacity: 1;
 }
 
 .topology-toggle-btn:hover {
@@ -262,14 +369,32 @@ body {
   bottom: 100px;
   right: 30px;
   width: 400px;
-  max-height: 70vh;
+  max-height: calc(100vh - 200px);
   background: var(--panel-bg);
   backdrop-filter: blur(15px);
   border: 2px solid var(--border-color);
   border-radius: 12px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.7);
+  box-shadow: 0 8px 40px rgba(0, 0, 0, 0.7);
   z-index: 999;
-  overflow: hidden;
+  overflow-y: auto;
+}
+
+/* Honeycomb pattern for controls panel */
+.controls-panel::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-image: 
+    linear-gradient(30deg, transparent 48%, rgba(0, 191, 255, 0.02) 49%, rgba(0, 191, 255, 0.02) 51%, transparent 52%),
+    linear-gradient(150deg, transparent 48%, rgba(0, 191, 255, 0.02) 49%, rgba(0, 191, 255, 0.02) 51%, transparent 52%),
+    linear-gradient(90deg, transparent 48%, rgba(0, 191, 255, 0.02) 49%, rgba(0, 191, 255, 0.02) 51%, transparent 52%);
+  background-size: 25px 43px;
+  opacity: 0.6;
+  pointer-events: none;
+  border-radius: 12px;
 }
 
 .panel-header {
@@ -564,6 +689,25 @@ body {
   padding: 10px;
   cursor: pointer;
   transition: all 0.2s;
+  position: relative;
+  overflow: hidden;
+}
+
+.hornet-box::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: 
+    linear-gradient(30deg, transparent 48%, rgba(0, 191, 255, 0.03) 49%, rgba(0, 191, 255, 0.03) 51%, transparent 52%),
+    linear-gradient(150deg, transparent 48%, rgba(0, 191, 255, 0.03) 49%, rgba(0, 191, 255, 0.03) 51%, transparent 52%),
+    linear-gradient(90deg, transparent 48%, rgba(0, 191, 255, 0.03) 49%, rgba(0, 191, 255, 0.03) 51%, transparent 52%);
+  background-size: 25px 43px;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.3s;
 }
 
 .hornet-box:hover {
@@ -571,10 +715,22 @@ body {
   transform: translateX(5px);
 }
 
+.hornet-box:hover::before {
+  opacity: 1;
+}
+
 .hornet-box.selected {
   background: rgba(0, 191, 255, 0.2);
   box-shadow: 0 0 20px rgba(0, 191, 255, 0.3);
   border-left-width: 6px;
+}
+
+.hornet-box.selected::before {
+  opacity: 1;
+  background: 
+    linear-gradient(30deg, transparent 48%, rgba(0, 191, 255, 0.05) 49%, rgba(0, 191, 255, 0.05) 51%, transparent 52%),
+    linear-gradient(150deg, transparent 48%, rgba(0, 191, 255, 0.05) 49%, rgba(0, 191, 255, 0.05) 51%, transparent 52%),
+    linear-gradient(90deg, transparent 48%, rgba(0, 191, 255, 0.05) 49%, rgba(0, 191, 255, 0.05) 51%, transparent 52%);
 }
 
 .hornet-header {
@@ -619,6 +775,8 @@ body {
 
 /* Home Navigation Button */
 .home-nav-btn {
+  position: absolute;
+  left: 2rem;
   padding: 0.6rem 1.2rem;
   background: rgba(0, 191, 255, 0.2);
   border: 2px solid var(--primary-cyan);
@@ -630,13 +788,10 @@ body {
   transition: all 0.3s ease;
   border-radius: 5px;
   font-family: 'Orbitron', sans-serif;
-  z-index: 10;
-  position: absolute;
-  left: 2rem;
-  transform: translateX(-3px);
 }
 
 .home-nav-btn:hover {
   background: rgba(0, 191, 255, 0.4);
   box-shadow: 0 0 15px rgba(0, 191, 255, 0.5);
+  transform: translateX(-3px);
 }

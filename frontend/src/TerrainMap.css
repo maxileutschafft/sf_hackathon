@@ -105,23 +105,11 @@
 
 /* Cursor Coordinates Overlay */
 .cursor-coords-overlay {
-  position: absolute;
-  background: rgba(0, 0, 0, 0.7);
-  padding: 4px 8px;
-  border-radius: 4px;
-  z-index: 1000;
-  pointer-events: none;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-family: 'Orbitron', monospace;
-  font-size: 0.7rem;
-  white-space: nowrap;
+  display: none;
 }
 
 .cursor-coords-text {
-  color: #888;
-  letter-spacing: 0.5px;
+  display: none;
 }
 
 /* Assembly Mode Indicator */

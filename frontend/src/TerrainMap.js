@@ -5,54 +5,26 @@ import './TerrainMap.css';
 
 mapboxgl.accessToken = process.env.REACT_APP_MAPBOX_TOKEN || 'pk.eyJ1IjoibWFwYm94IiwiYSI6ImNpejY4M29iazA2Z2gycXA4N2pmbDZmangifQ.-g_vE53SD2WrJ6tFX7QHmA';
 
-const METERS_TO_LNG = 0.0001;
-const METERS_TO_LAT = 0.0001;
-
-function TerrainMap({ uavs, selectedUavId, selectedSwarm, onSelectUav, onMapClick, onRefreshData, rois, targets, origins = [], jammers = [], onToggleStyleReady, onToggle2DViewReady, assemblyMode, isSelectingTarget, isSelectingOrigin, isSelectingJammer, onJammerCreated }) {
+function TerrainMap({ uavs, selectedUavId, selectedSwarm, onSelectUav, onMapClick, rois, targets, onToggleStyleReady, onToggle2DViewReady, assemblyMode, initialViewMode = '3d' }) {
   const mapContainer = useRef(null);
   const map = useRef(null);
+  const pyramidHandlers = useRef(new Map()); // Track attached handlers
+  const onMapClickRef = useRef(onMapClick); // Store latest callback
   // Base position: lat 37.5139, lng -122.4961
   const [lng] = useState(-122.4961);
   const [lat] = useState(37.5139);
   const [zoom] = useState(13);
   // Terrain style toggle
   const [showSatellite, setShowSatellite] = useState(true);
-  const [is2DView, setIs2DView] = useState(false);
-  const [styleVersion, setStyleVersion] = useState(0);
+  const [is2DView, setIs2DView] = useState(initialViewMode === '2d');
+  const [clickTarget, setClickTarget] = useState(null);
   const [cursorCoords, setCursorCoords] = useState(null);
   const [cursorPixelPos, setCursorPixelPos] = useState(null);
-  const [refreshCounter, setRefreshCounter] = useState(0);
-  
-  // Jammer creation - no longer needed for click-based approach
 
-  const convertPointToLngLat = (point) => {
-    if (point && typeof point.lng === 'number' && typeof point.lat === 'number') {
-      return [point.lng, point.lat];
-    }
-    if (point && typeof point.x === 'number' && typeof point.y === 'number') {
-      return [
-        lng + (point.y * METERS_TO_LNG),
-        lat + (point.x * METERS_TO_LAT)
-      ];
-    }
-    return [lng, lat];
-  };
-
-  // Helper function to create a circle polygon from center point and radius in meters
-  const createCirclePolygon = (centerLng, centerLat, radiusInMeters, points = 64) => {
-    const coords = [];
-    const distanceX = radiusInMeters * METERS_TO_LNG;
-    const distanceY = radiusInMeters * METERS_TO_LAT;
-
-    for (let i = 0; i <= points; i++) {
-      const theta = (i / points) * (2 * Math.PI);
-      const x = distanceX * Math.cos(theta);
-      const y = distanceY * Math.sin(theta);
-      coords.push([centerLng + x, centerLat + y]);
-    }
-
-    return coords;
-  };
+  // Keep the ref updated with latest callback
+  useEffect(() => {
+    onMapClickRef.current = onMapClick;
+  }, [onMapClick]);
 
   // Initialize map
   useEffect(() => {
@@ -60,41 +32,32 @@ function TerrainMap({ uavs, selectedUavId, selectedSwarm, onSelectUav, onMapClic
 
     console.log('Initializing map at Half Moon Bay Airport:', lng, lat);
 
-    const handleStyleLoad = () => {
-      if (!map.current) return;
-
-      if (!map.current.getSource('mapbox-dem')) {
-        map.current.addSource('mapbox-dem', {
-          type: 'raster-dem',
-          url: 'mapbox://mapbox.mapbox-terrain-dem-v1',
-          tileSize: 512,
-          maxzoom: 14
-        });
-      }
-
-      map.current.setTerrain({
-        source: 'mapbox-dem',
-        exaggeration: 1.5
-      });
-
-      setStyleVersion(prev => prev + 1);
-    };
-
     map.current = new mapboxgl.Map({
       container: mapContainer.current,
       style: 'mapbox://styles/mapbox/satellite-v9',
       center: [lng, lat],
       zoom: zoom,
-      pitch: 70,
+      pitch: initialViewMode === '2d' ? 0 : 70,
       bearing: 0,
       antialias: true,
       attributionControl: false
     });
 
-    map.current.on('style.load', handleStyleLoad);
-
     map.current.on('load', () => {
       console.log('Map loaded successfully!');
+
+      // Add 3D terrain
+      map.current.addSource('mapbox-dem', {
+        type: 'raster-dem',
+        url: 'mapbox://mapbox.mapbox-terrain-dem-v1',
+        tileSize: 512,
+        maxzoom: 14
+      });
+
+      map.current.setTerrain({
+        source: 'mapbox-dem',
+        exaggeration: 1.5
+      });
 
       // Add 1km boundary box
       const boundarySize = 500; // 500m from center = 1km box
@@ -157,6 +120,32 @@ function TerrainMap({ uavs, selectedUavId, selectedSwarm, onSelectUav, onMapClic
             'fill-extrusion-height': 100
           }
         });
+
+        // Add thin vertical red line along this edge
+        map.current.addSource(`boundary-line-${i}`, {
+          type: 'geojson',
+          data: {
+            type: 'Feature',
+            geometry: {
+              type: 'LineString',
+              coordinates: [
+                [...boundaryCoords[i], 0],
+                [...boundaryCoords[i], 100]
+              ]
+            }
+          }
+        });
+
+        map.current.addLayer({
+          id: `boundary-line-${i}`,
+          type: 'line',
+          source: `boundary-line-${i}`,
+          paint: {
+            'line-color': '#ff0000',
+            'line-width': 2,
+            'line-opacity': 0.4
+          }
+        });
       }
 
       console.log('3D terrain and boundary added');
@@ -164,27 +153,26 @@ function TerrainMap({ uavs, selectedUavId, selectedSwarm, onSelectUav, onMapClic
 
     // Add map click handler
     map.current.on('click', (e) => {
-      // Debug: log click events to help trace selection issues
-      console.log('Map clicked at pixel:', e.point, 'lngLat:', e.lngLat);
-      
-      // Force refresh all markers on every click by reloading data from backend
-      if (onRefreshData) {
-        console.log('Refreshing mission data from backend...');
-        onRefreshData();
-      }
-      setRefreshCounter(prev => prev + 1);
+      console.log('🗺️ MAP CLICKED IN TERRAINMAP');
 
-      // Check if click is on a UAV layer
-      const uavLayerList = Object.keys(uavs).map(id => `uav-point-${id}`);
-      console.log('Querying layers for click:', uavLayerList);
-      const features = map.current.queryRenderedFeatures(e.point, {
-        layers: uavLayerList
+      // Check if click is on a UAV pyramid layer
+      const pyramidLayers = Object.keys(uavs).map(id => `uav-pyramid-${id}`).filter(layerId => {
+        return map.current.getLayer(layerId);
       });
-      console.log('Features under click:', features.length);
 
-      if (features.length === 0 && onMapClick) {
-        console.log('Calling onMapClick callback with', e.lngLat.lng, e.lngLat.lat);
-        onMapClick(e.lngLat.lng, e.lngLat.lat);
+      const features = map.current.queryRenderedFeatures(e.point, {
+        layers: pyramidLayers
+      });
+
+      console.log('🗺️ Features found:', features.length);
+      console.log('🗺️ onMapClickRef.current exists:', !!onMapClickRef.current);
+
+      if (features.length === 0 && onMapClickRef.current) {
+        console.log('🗺️ Calling onMapClick callback with:', e.lngLat.lng, e.lngLat.lat);
+        onMapClickRef.current(e.lngLat.lng, e.lngLat.lat);
+        setClickTarget({ lng: e.lngLat.lng, lat: e.lngLat.lat, timestamp: Date.now() });
+      } else {
+        console.log('🗺️ Not calling onMapClick - feature clicked or no callback');
       }
     });
 
@@ -206,7 +194,6 @@ function TerrainMap({ uavs, selectedUavId, selectedSwarm, onSelectUav, onMapClic
 
     return () => {
       if (map.current) {
-        map.current.off('style.load', handleStyleLoad);
         map.current.remove();
       }
     };
@@ -228,87 +215,129 @@ function TerrainMap({ uavs, selectedUavId, selectedSwarm, onSelectUav, onMapClic
 
       console.log(`Updating ${uavId}:`, { position: uav.position, mapCoords: [newLng, newLat], altitude });
 
-      // Vertical line from ground to UAV
+      // Vertical cylinder from ground to UAV (2m diameter)
       const lineSourceId = `uav-line-${uavId}`;
+      const cylinderRadius = 0.00001; // ~1m radius = 2m diameter
+      const cylinderSegments = 16;
+      const cylinderCoords = [];
+      for (let i = 0; i <= cylinderSegments; i++) {
+        const angle = (i / cylinderSegments) * Math.PI * 2;
+        const dx = Math.cos(angle) * cylinderRadius;
+        const dy = Math.sin(angle) * cylinderRadius;
+        cylinderCoords.push([newLng + dx, newLat + dy, altitude]);
+      }
+
       if (!map.current.getSource(lineSourceId)) {
         map.current.addSource(lineSourceId, {
           type: 'geojson',
           data: {
             type: 'Feature',
             geometry: {
-              type: 'LineString',
-              coordinates: [[newLng, newLat, 0], [newLng, newLat, altitude]]
+              type: 'Polygon',
+              coordinates: [cylinderCoords]
             }
           }
         });
 
         map.current.addLayer({
           id: lineSourceId,
-          type: 'line',
+          type: 'fill-extrusion',
           source: lineSourceId,
           paint: {
-            'line-color': uav.color,
-            'line-width': 2,
-            'line-opacity': 0.7
+            'fill-extrusion-color': uav.color,
+            'fill-extrusion-height': altitude,
+            'fill-extrusion-base': 0,
+            'fill-extrusion-opacity': 0.7
           }
         });
       } else {
         map.current.getSource(lineSourceId).setData({
           type: 'Feature',
           geometry: {
-            type: 'LineString',
-            coordinates: [[newLng, newLat, 0], [newLng, newLat, altitude]]
+            type: 'Polygon',
+            coordinates: [cylinderCoords]
           }
         });
+        map.current.setPaintProperty(lineSourceId, 'fill-extrusion-height', altitude);
       }
 
-      // UAV point at altitude
-      const pointSourceId = `uav-point-${uavId}`;
-      if (!map.current.getSource(pointSourceId)) {
-        map.current.addSource(pointSourceId, {
+      // Glowing pyramid at altitude with zoom-based scaling
+      const pyramidSourceId = `uav-pyramid-${uavId}`;
+      const currentZoom = map.current.getZoom();
+      // Scale size based on zoom: larger at lower zoom levels, cap at zoom 16
+      const zoomScale = Math.max(0.5, Math.min(2.5, 16 / Math.max(currentZoom, 10)));
+      const pyramidSize = 0.00016 * zoomScale; // Doubled size (~16-20 meters base)
+      const pyramidHeight = 30; // Doubled height of pyramid in meters
+      
+      // Create triangle/pyramid shape (3-sided polygon pointing north)
+      const pyramidPolygon = {
+        type: 'Feature',
+        properties: {
+          uavId: uavId,
+          color: uav.color
+        },
+        geometry: {
+          type: 'Polygon',
+          coordinates: [[
+            [newLng, newLat + pyramidSize, altitude],              // North point (front)
+            [newLng - pyramidSize * 0.8, newLat - pyramidSize * 0.5, altitude],  // Southwest point
+            [newLng + pyramidSize * 0.8, newLat - pyramidSize * 0.5, altitude],  // Southeast point
+            [newLng, newLat + pyramidSize, altitude]               // Close the polygon
+          ]]
+        }
+      };
+
+      if (!map.current.getSource(pyramidSourceId)) {
+        map.current.addSource(pyramidSourceId, {
           type: 'geojson',
-          data: {
-            type: 'Feature',
-            geometry: {
-              type: 'Point',
-              coordinates: [newLng, newLat, altitude]
-            }
-          }
+          data: pyramidPolygon
         });
 
         map.current.addLayer({
-          id: pointSourceId,
-          type: 'circle',
-          source: pointSourceId,
+          id: pyramidSourceId,
+          type: 'fill-extrusion',
+          source: pyramidSourceId,
           paint: {
-            'circle-radius': selectedUavId === uavId ? 10 : 8,
-            'circle-color': uav.color,
-            'circle-stroke-width': 2,
-            'circle-stroke-color': '#ffffff',
-            'circle-opacity': 1
+            'fill-extrusion-color': uav.color,
+            'fill-extrusion-height': altitude + pyramidHeight,
+            'fill-extrusion-base': altitude,
+            'fill-extrusion-opacity': selectedUavId === uavId ? 0.9 : 0.7,
+            'fill-extrusion-vertical-gradient': true
           }
         });
 
-        // Add click handler only once per layer
-        const clickHandler = () => onSelectUav(uavId);
-        map.current.on('click', pointSourceId, clickHandler);
-        map.current.on('mouseenter', pointSourceId, () => {
-          map.current.getCanvas().style.cursor = 'pointer';
-        });
-        map.current.on('mouseleave', pointSourceId, () => {
-          map.current.getCanvas().style.cursor = '';
-        });
+        // Only attach handlers once when layer is created
+        if (!pyramidHandlers.current.has(pyramidSourceId)) {
+          const clickHandler = (e) => {
+            // Prevent map click from firing
+            e.originalEvent.stopPropagation();
+            onSelectUav(uavId);
+          };
+          const mouseEnterHandler = () => {
+            if (map.current) map.current.getCanvas().style.cursor = 'pointer';
+          };
+          const mouseLeaveHandler = () => {
+            if (map.current) map.current.getCanvas().style.cursor = '';
+          };
+
+          map.current.on('click', pyramidSourceId, clickHandler);
+          map.current.on('mouseenter', pyramidSourceId, mouseEnterHandler);
+          map.current.on('mouseleave', pyramidSourceId, mouseLeaveHandler);
+
+          // Store handlers for cleanup
+          pyramidHandlers.current.set(pyramidSourceId, {
+            clickHandler,
+            mouseEnterHandler,
+            mouseLeaveHandler
+          });
+        }
       } else {
-        map.current.getSource(pointSourceId).setData({
-          type: 'Feature',
-          geometry: {
-            type: 'Point',
-            coordinates: [newLng, newLat, altitude]
-          }
-        });
+        map.current.getSource(pyramidSourceId).setData(pyramidPolygon);
 
-        // Update circle size based on selection
-        map.current.setPaintProperty(pointSourceId, 'circle-radius', selectedUavId === uavId ? 10 : 8);
+        // Update opacity based on selection
+        map.current.setPaintProperty(pyramidSourceId, 'fill-extrusion-opacity', selectedUavId === uavId ? 0.9 : 0.7);
+        map.current.setPaintProperty(pyramidSourceId, 'fill-extrusion-height', altitude + pyramidHeight);
+        map.current.setPaintProperty(pyramidSourceId, 'fill-extrusion-base', altitude);
       }
     });
 
@@ -316,9 +345,20 @@ function TerrainMap({ uavs, selectedUavId, selectedSwarm, onSelectUav, onMapClic
     const currentUavIds = Object.keys(uavs);
     if (map.current.getStyle()) {
       map.current.getStyle().layers.forEach(layer => {
-        if (layer.id.startsWith('uav-line-') || layer.id.startsWith('uav-point-')) {
-          const uavId = layer.id.replace('uav-line-', '').replace('uav-point-', '');
+        if (layer.id.startsWith('uav-line-') || layer.id.startsWith('uav-point-') || layer.id.startsWith('uav-pyramid-')) {
+          const uavId = layer.id.replace('uav-line-', '').replace('uav-point-', '').replace('uav-pyramid-', '');
           if (!currentUavIds.includes(uavId)) {
+            // Remove event handlers before removing layer
+            if (layer.id.startsWith('uav-pyramid-')) {
+              const handlers = pyramidHandlers.current.get(layer.id);
+              if (handlers && map.current.getLayer(layer.id)) {
+                map.current.off('click', layer.id, handlers.clickHandler);
+                map.current.off('mouseenter', layer.id, handlers.mouseEnterHandler);
+                map.current.off('mouseleave', layer.id, handlers.mouseLeaveHandler);
+                pyramidHandlers.current.delete(layer.id);
+              }
+            }
+            
             if (map.current.getLayer(layer.id)) {
               map.current.removeLayer(layer.id);
             }
@@ -329,7 +369,7 @@ function TerrainMap({ uavs, selectedUavId, selectedSwarm, onSelectUav, onMapClic
         }
       });
     }
-  }, [uavs, selectedUavId, lng, lat, onSelectUav, styleVersion]);
+  }, [uavs, selectedUavId, lng, lat, onSelectUav]);
 
   // ROI circles visualization
   useEffect(() => {
@@ -381,238 +421,138 @@ function TerrainMap({ uavs, selectedUavId, selectedSwarm, onSelectUav, onMapClic
         });
       }
     });
-  }, [rois, lng, lat, styleVersion]);
+  }, [rois, lng, lat]);
 
-  // UNIFIED MARKER VISUALIZATION - Re-render ALL markers on every update
+  // Target markers visualization
   useEffect(() => {
     if (!map.current || !map.current.isStyleLoaded()) return;
 
-    console.log('=== UNIFIED MARKER EFFECT ===');
-    console.log('Targets:', targets?.length || 0, targets);
-    console.log('Origins:', origins?.length || 0, origins);
-    console.log('Jammers:', jammers?.length || 0, jammers);
+    const metersToLng = 0.0001;
+    const metersToLat = 0.0001;
 
-    // STEP 1: Remove ALL existing marker layers and sources
-    const style = map.current.getStyle();
-    if (style?.layers) {
-      const layersToRemove = [];
-      const sourcesToRemove = [];
+    targets.forEach((target, index) => {
+      const targetLng = lng + (target.y * metersToLng);
+      const targetLat = lat + (target.x * metersToLat);
 
-      style.layers.forEach(layer => {
-        if (layer.id.startsWith('target-') || 
-            layer.id.startsWith('origin-') || 
-            layer.id.startsWith('jammer-')) {
-          layersToRemove.push(layer.id);
-        }
-      });
+      const sourceId = `target-${index}`;
+      const layerId = `target-marker-${index}`;
 
-      // Remove layers first
-      layersToRemove.forEach(layerId => {
-        if (map.current.getLayer(layerId)) {
-          map.current.removeLayer(layerId);
-        }
-      });
-
-      // Then remove sources
-      Object.keys(style.sources).forEach(sourceId => {
-        if (sourceId.startsWith('target-') || 
-            sourceId.startsWith('origin-') || 
-            sourceId.startsWith('jammer-')) {
-          sourcesToRemove.push(sourceId);
-        }
-      });
-
-      sourcesToRemove.forEach(sourceId => {
-        if (map.current.getSource(sourceId)) {
-          map.current.removeSource(sourceId);
-        }
-      });
-
-      console.log('Removed', layersToRemove.length, 'layers and', sourcesToRemove.length, 'sources');
-    }
-
-    // STEP 2: Add ALL target markers (RED)
-    if (targets && targets.length > 0) {
-      targets.forEach((target, index) => {
-        const markerId = target.id || `target-${index}`;
-        const [targetLng, targetLat] = convertPointToLngLat(target);
-        const altitude = typeof target.z === 'number' ? target.z : 0;
-
-        const lineSourceId = `target-line-${markerId}`;
-        const pointSourceId = `target-point-${markerId}`;
-
-        // Add line
-        map.current.addSource(lineSourceId, {
-          type: 'geojson',
-          data: {
-            type: 'Feature',
-            geometry: {
-              type: 'LineString',
-              coordinates: [
-                [targetLng, targetLat, 0],
-                [targetLng, targetLat, altitude]
-              ]
-            }
-          }
-        });
-
-        map.current.addLayer({
-          id: lineSourceId,
-          type: 'line',
-          source: lineSourceId,
-          paint: {
-            'line-color': '#ff0000',
-            'line-width': 2,
-            'line-opacity': 0.7
-          }
-        });
-
-        // Add point
-        map.current.addSource(pointSourceId, {
-          type: 'geojson',
-          data: {
-            type: 'Feature',
-            geometry: {
-              type: 'Point',
-              coordinates: [targetLng, targetLat, altitude]
-            }
-          }
-        });
-
-        map.current.addLayer({
-          id: pointSourceId,
-          type: 'circle',
-          source: pointSourceId,
-          paint: {
-            'circle-radius': 8,
-            'circle-color': '#ff0000',
-            'circle-stroke-width': 2,
-            'circle-stroke-color': '#ffffff',
-            'circle-opacity': 1
-          }
-        });
-
-        console.log('Added target:', markerId, 'at', targetLng, targetLat);
-      });
-    }
-
-    // STEP 3: Add ALL origin markers (GREEN)
-    if (origins && origins.length > 0) {
-      origins.forEach((origin, index) => {
-        const markerId = origin.id || `origin-${index}`;
-        const [originLng, originLat] = convertPointToLngLat(origin);
-        const altitude = typeof origin.z === 'number' ? origin.z : 0;
-
-        const lineSourceId = `origin-line-${markerId}`;
-        const pointSourceId = `origin-point-${markerId}`;
-
-        // Add line
-        map.current.addSource(lineSourceId, {
-          type: 'geojson',
-          data: {
-            type: 'Feature',
-            geometry: {
-              type: 'LineString',
-              coordinates: [
-                [originLng, originLat, 0],
-                [originLng, originLat, altitude]
-              ]
-            }
-          }
-        });
-
-        map.current.addLayer({
-          id: lineSourceId,
-          type: 'line',
-          source: lineSourceId,
-          paint: {
-            'line-color': '#00ff00',
-            'line-width': 2,
-            'line-opacity': 0.7
-          }
-        });
-
-        // Add point
-        map.current.addSource(pointSourceId, {
-          type: 'geojson',
-          data: {
-            type: 'Feature',
-            geometry: {
-              type: 'Point',
-              coordinates: [originLng, originLat, altitude]
-            }
-          }
-        });
-
-        map.current.addLayer({
-          id: pointSourceId,
-          type: 'circle',
-          source: pointSourceId,
-          paint: {
-            'circle-radius': 8,
-            'circle-color': '#00ff00',
-            'circle-stroke-width': 2,
-            'circle-stroke-color': '#ffffff',
-            'circle-opacity': 1
-          }
-        });
-
-        console.log('Added origin:', markerId, 'at', originLng, originLat);
-      });
-    }
-
-    // STEP 4: Add ALL jammer zones (ORANGE CIRCLES)
-    if (jammers && jammers.length > 0) {
-      jammers.forEach((jammer, index) => {
-        const markerId = jammer.id || `jammer-${index}`;
-        const [jammerLng, jammerLat] = convertPointToLngLat(jammer);
-        const radiusInMeters = jammer.radius || 50;
-
-        const sourceId = `jammer-${markerId}`;
-        const layerId = `jammer-circle-${markerId}`;
-        const outlineLayerId = `jammer-outline-${markerId}`;
-
-        // Create polygon circle
-        const circleCoords = createCirclePolygon(jammerLng, jammerLat, radiusInMeters);
-
+      if (!map.current.getSource(sourceId)) {
         map.current.addSource(sourceId, {
           type: 'geojson',
           data: {
             type: 'Feature',
             geometry: {
-              type: 'Polygon',
-              coordinates: [circleCoords]
+              type: 'Point',
+              coordinates: [targetLng, targetLat, 0]
             }
           }
         });
 
         map.current.addLayer({
           id: layerId,
-          type: 'fill',
+          type: 'circle',
           source: sourceId,
           paint: {
-            'fill-color': '#ff8c00',
-            'fill-opacity': 0.3
+            'circle-radius': 12,
+            'circle-color': '#ff0000',
+            'circle-opacity': 1,
+            'circle-stroke-width': 3,
+            'circle-stroke-color': '#ffffff'
           }
         });
-
-        map.current.addLayer({
-          id: outlineLayerId,
-          type: 'line',
-          source: sourceId,
-          paint: {
-            'line-color': '#ff8c00',
-            'line-width': 2,
-            'line-opacity': 0.8
+      } else {
+        map.current.getSource(sourceId).setData({
+          type: 'Feature',
+          geometry: {
+            type: 'Point',
+            coordinates: [targetLng, targetLat, 0]
           }
         });
+      }
+    });
+  }, [targets, lng, lat]);
 
-        console.log('Added jammer:', markerId, 'at', jammerLng, jammerLat, 'radius:', radiusInMeters);
+  // Click target pulsating marker
+  useEffect(() => {
+    if (!map.current || !map.current.isStyleLoaded() || !clickTarget) return;
+
+    const sourceId = 'click-target';
+    const layerId = 'click-target-marker';
+
+    if (!map.current.getSource(sourceId)) {
+      map.current.addSource(sourceId, {
+        type: 'geojson',
+        data: {
+          type: 'Feature',
+          geometry: {
+            type: 'Point',
+            coordinates: [clickTarget.lng, clickTarget.lat, 0]
+          }
+        }
+      });
+
+      map.current.addLayer({
+        id: layerId,
+        type: 'circle',
+        source: sourceId,
+        paint: {
+          'circle-radius': [
+            'interpolate',
+            ['linear'],
+            ['zoom'],
+            10, 15,
+            15, 30
+          ],
+          'circle-color': '#00ff00',
+          'circle-opacity': 0.4,
+          'circle-stroke-width': 3,
+          'circle-stroke-color': '#00ff00',
+          'circle-stroke-opacity': 0.8
+        }
+      });
+
+      // Pulsate animation
+      let radius = 15;
+      let growing = true;
+      const interval = setInterval(() => {
+        if (!map.current.getLayer(layerId)) {
+          clearInterval(interval);
+          return;
+        }
+        radius = growing ? radius + 1 : radius - 1;
+        if (radius >= 25) growing = false;
+        if (radius <= 15) growing = true;
+
+        map.current.setPaintProperty(layerId, 'circle-radius', [
+          'interpolate',
+          ['linear'],
+          ['zoom'],
+          10, radius,
+          15, radius * 2
+        ]);
+      }, 50);
+
+      // Remove after 5 seconds
+      setTimeout(() => {
+        clearInterval(interval);
+        if (map.current.getLayer(layerId)) {
+          map.current.removeLayer(layerId);
+        }
+        if (map.current.getSource(sourceId)) {
+          map.current.removeSource(sourceId);
+        }
+      }, 5000);
+    } else {
+      map.current.getSource(sourceId).setData({
+        type: 'Feature',
+        geometry: {
+          type: 'Point',
+          coordinates: [clickTarget.lng, clickTarget.lat, 0]
+        }
       });
     }
-
-    console.log('=== MARKER RENDERING COMPLETE ===');
-  }, [targets, origins, jammers, lng, lat, styleVersion, refreshCounter]);
+  }, [clickTarget]);
 
   // Formation lines and swarm label
   useEffect(() => {
@@ -707,8 +647,9 @@ function TerrainMap({ uavs, selectedUavId, selectedSwarm, onSelectUav, onMapClic
             source: sourceId,
             paint: {
               'line-color': swarmColor,
-              'line-width': 3,
-              'line-opacity': 0.8
+              'line-width': 6,
+              'line-opacity': 0.9,
+              'line-blur': 2
             }
           });
         } else {
@@ -789,10 +730,112 @@ function TerrainMap({ uavs, selectedUavId, selectedSwarm, onSelectUav, onMapClic
       ? 'mapbox://styles/mapbox/satellite-v9'
       : 'mapbox://styles/mapbox/outdoors-v12';
 
+    // Clear all pyramid handlers before style change
+    pyramidHandlers.current.clear();
+
     map.current.setStyle(styleUrl);
+
+    // Re-add UAV layers after style change
+    map.current.once('style.load', () => {
+      // Add DEM source and terrain for both views
+      if (!map.current.getSource('mapbox-dem')) {
+        map.current.addSource('mapbox-dem', {
+          type: 'raster-dem',
+          url: 'mapbox://mapbox.mapbox-terrain-dem-v1',
+          tileSize: 512,
+          maxzoom: 14
+        });
+      }
+
+      map.current.setTerrain({
+        source: 'mapbox-dem',
+        exaggeration: 1.5
+      });
+
+      // Re-add all UAV layers
+      const metersToLng = 0.0001;
+      const metersToLat = 0.0001;
+
+      Object.entries(uavs).forEach(([uavId, uav]) => {
+        const newLng = lng + (uav.position.y * metersToLng);
+        const newLat = lat + (uav.position.x * metersToLat);
+        const altitude = uav.position.z;
+
+        // Re-add vertical line
+        const lineSourceId = `uav-line-${uavId}`;
+        if (!map.current.getSource(lineSourceId)) {
+          map.current.addSource(lineSourceId, {
+            type: 'geojson',
+            data: {
+              type: 'Feature',
+              geometry: {
+                type: 'LineString',
+                coordinates: [[newLng, newLat, 0], [newLng, newLat, altitude]]
+              }
+            }
+          });
+
+          map.current.addLayer({
+            id: lineSourceId,
+            type: 'line',
+            source: lineSourceId,
+            paint: {
+              'line-color': uav.color,
+              'line-width': 4,
+              'line-opacity': 0.8
+            }
+          });
+        }
+
+        // Re-add pyramid
+        const pyramidSourceId = `uav-pyramid-${uavId}`;
+        const pyramidSize = 0.00008;
+        const pyramidHeight = 15;
+        
+        const pyramidPolygon = {
+          type: 'Feature',
+          properties: {
+            uavId: uavId,
+            color: uav.color
+          },
+          geometry: {
+            type: 'Polygon',
+            coordinates: [[
+              [newLng, newLat + pyramidSize, altitude],
+              [newLng + pyramidSize, newLat, altitude],
+              [newLng, newLat - pyramidSize, altitude],
+              [newLng - pyramidSize, newLat, altitude],
+              [newLng, newLat + pyramidSize, altitude]
+            ]]
+          }
+        };
+
+        if (!map.current.getSource(pyramidSourceId)) {
+          map.current.addSource(pyramidSourceId, {
+            type: 'geojson',
+            data: pyramidPolygon
+          });
+
+          map.current.addLayer({
+            id: pyramidSourceId,
+            type: 'fill-extrusion',
+            source: pyramidSourceId,
+            paint: {
+              'fill-extrusion-color': uav.color,
+              'fill-extrusion-height': altitude + pyramidHeight,
+              'fill-extrusion-base': altitude,
+              'fill-extrusion-opacity': selectedUavId === uavId ? 0.9 : 0.7,
+              'fill-extrusion-vertical-gradient': true
+            }
+          });
+
+          // Handlers will be attached by the main useEffect on next render
+        }
+      });
+    });
   };
 
-  // Toggle 2D view (top-down bird's eye perspective)
+  // Toggle 2D view
   const toggle2DView = () => {
     if (!map.current) return;
 
@@ -828,57 +871,7 @@ function TerrainMap({ uavs, selectedUavId, selectedSwarm, onSelectUav, onMapClic
     if (onToggle2DViewReady) {
       onToggle2DViewReady(() => toggle2DView);
     }
-  }, [onToggle2DViewReady, is2DView]);
-
-  // If parent requests target/origin/jammer selection mode
-  useEffect(() => {
-    if (!map.current || !mapContainer.current) return;
-    const container = mapContainer.current;
-
-    const overlayClickHandler = (ev) => {
-      if (!isSelectingTarget && !isSelectingOrigin && !isSelectingJammer) return;
-      
-      const rect = container.getBoundingClientRect();
-      const x = ev.clientX - rect.left;
-      const y = ev.clientY - rect.top;
-      if (!map.current) return;
-      const lngLat = map.current.unproject([x, y]);
-      
-      // Handle jammer click (50m fixed radius)
-      if (isSelectingJammer && onJammerCreated) {
-        const baseCoords = { lng: -122.4961, lat: 37.5139 };
-        const x_coord = (lngLat.lat - baseCoords.lat) / METERS_TO_LAT;
-        const y_coord = (lngLat.lng - baseCoords.lng) / METERS_TO_LNG;
-        
-        onJammerCreated({
-          lng: lngLat.lng,
-          lat: lngLat.lat,
-          x: x_coord,
-          y: y_coord,
-          radius: 50  // Fixed 50m radius
-        });
-        return;
-      }
-      
-      // Handle target/origin clicks
-      if ((isSelectingTarget || isSelectingOrigin) && onMapClick) {
-        console.log('Overlay click detected:', lngLat);
-        onMapClick(lngLat.lng, lngLat.lat);
-      }
-    };
-
-    if (isSelectingTarget || isSelectingOrigin || isSelectingJammer) {
-      container.style.cursor = 'crosshair';
-      container.addEventListener('click', overlayClickHandler);
-    } else {
-      container.style.cursor = '';
-    }
-
-    return () => {
-      container.removeEventListener('click', overlayClickHandler);
-      if (container) container.style.cursor = '';
-    };
-  }, [isSelectingTarget, isSelectingOrigin, isSelectingJammer, onMapClick, onJammerCreated]);
+  }, [onToggle2DViewReady]);
 
   const selectedUav = uavs[selectedUavId];
 
@@ -902,19 +895,15 @@ function TerrainMap({ uavs, selectedUavId, selectedSwarm, onSelectUav, onMapClic
         )}
       </div>
 
-      {/* Cursor coordinates display */}
+      {/* Cursor indicator - smooth red circle */}
       {cursorCoords && cursorPixelPos && (
         <div
           className="cursor-coords-overlay"
           style={{
-            left: `${cursorPixelPos.x + 15}px`,
-            top: `${cursorPixelPos.y - 30}px`
+            left: `${cursorPixelPos.x - 12}px`,
+            top: `${cursorPixelPos.y - 12}px`
           }}
-        >
-          <span className="cursor-coords-text">
-            {cursorCoords.lat.toFixed(4)}°, {cursorCoords.lng.toFixed(4)}°
-          </span>
-        </div>
+        />
       )}
 
       {/* Assembly mode indicator */}
