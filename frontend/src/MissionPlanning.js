@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import './MissionPlanning.css';
 import TerrainMap from './TerrainMap';
+import { mapToSimulatorCoords } from './utils/coordinateUtils';
+import { logger } from './utils/logger';
 
 function MissionPlanning({ onNavigateHome }) {
   const [onToggleStyle, setOnToggleStyle] = useState(null);
@@ -71,7 +73,7 @@ function MissionPlanning({ onNavigateHome }) {
         }
       }
     } catch (error) {
-      console.error('Error loading mission params:', error);
+      logger.error('Error loading mission params:', error);
     }
   };
 
@@ -87,12 +89,12 @@ function MissionPlanning({ onNavigateHome }) {
         })
       });
       if (response.ok) {
-        console.log('Mission params saved successfully');
+        logger.debug('Mission params saved successfully');
         // Reload data from backend to ensure consistency
         await loadMissionParams();
       }
     } catch (error) {
-      console.error('Error saving mission params:', error);
+      logger.error('Error saving mission params:', error);
     }
   };
 
@@ -115,16 +117,9 @@ function MissionPlanning({ onNavigateHome }) {
   };
 
   const handleMapClick = (lng, lat) => {
-    console.log('MissionPlanning handleMapClick called with', lng, lat, 'isSelectingTarget=', isSelectingTarget, 'isSelectingOrigin=', isSelectingOrigin);
-    
     if (isSelectingTarget) {
-      // Convert lng/lat to x/y coordinates (same as in MissionControl)
-      const baseCoords = { lng: -122.4961, lat: 37.5139 };
-      const metersToLng = 0.0001;
-      const metersToLat = 0.0001;
-
-      const x = (lat - baseCoords.lat) / metersToLat;
-      const y = (lng - baseCoords.lng) / metersToLng;
+      // Convert lng/lat to x/y coordinates
+      const { x, y } = mapToSimulatorCoords(lng, lat);
 
       const newTarget = {
         id: `TARGET-${targetCounter}`,
@@ -145,12 +140,7 @@ function MissionPlanning({ onNavigateHome }) {
     
     if (isSelectingOrigin) {
       // Convert lng/lat to x/y coordinates
-      const baseCoords = { lng: -122.4961, lat: 37.5139 };
-      const metersToLng = 0.0001;
-      const metersToLat = 0.0001;
-
-      const x = (lat - baseCoords.lat) / metersToLat;
-      const y = (lng - baseCoords.lng) / metersToLng;
+      const { x, y } = mapToSimulatorCoords(lng, lat);
 
       const newOrigin = {
         id: `ORIGIN-${originCounter}`,

@@ -1,6 +1,10 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import './App.css';
 import TerrainMap from './TerrainMap';
+import HornetCard from './components/HornetCard';
+import { mapToSimulatorCoords, getHexagonalFormation } from './utils/coordinateUtils';
+import { logger } from './utils/logger';
+import { PHYSICS, LOGGING } from './config/constants';
 
 function MissionControl({ onNavigateHome }) {
   const [connected, setConnected] = useState(false);
@@ -20,11 +24,6 @@ function MissionControl({ onNavigateHome }) {
   const [selectedUavId, setSelectedUavId] = useState(null);
   const [selectedSwarm, setSelectedSwarm] = useState(null);
   const [is2DView, setIs2DView] = useState(true); // Track current view mode
-
-  // Debug: Log whenever selections change
-  useEffect(() => {
-    console.log('🔴 SELECTION STATE CHANGED:', { selectedUavId, selectedSwarm });
-  }, [selectedUavId, selectedSwarm]);
   const [expandedSwarms, setExpandedSwarms] = useState({ 'SWARM-1': true, 'SWARM-2': true });
   const [logs, setLogs] = useState([]);
   const [showControls, setShowControls] = useState(false);
@@ -48,7 +47,7 @@ function MissionControl({ onNavigateHome }) {
     const ws = new WebSocket(wsUrl);
 
     ws.onopen = () => {
-      console.log('Connected to backend');
+      logger.info('Connected to backend');
       setConnected(true);
       addLog('Connected to backend server');
     };
@@ -80,17 +79,17 @@ function MissionControl({ onNavigateHome }) {
           addLog(`Error: ${data.message}`, 'error');
         }
       } catch (error) {
-        console.error('Error parsing message:', error);
+        logger.error('Error parsing message:', error);
       }
     };
 
     ws.onerror = (error) => {
-      console.error('WebSocket error:', error);
+      logger.error('WebSocket error:', error);
       addLog('WebSocket error occurred', 'error');
     };
 
     ws.onclose = () => {
-      console.log('Disconnected from backend');
+      logger.info('Disconnected from backend');
       setConnected(false);
       addLog('Disconnected from backend server');
       setTimeout(connectWebSocket, 3000);
@@ -101,7 +100,7 @@ function MissionControl({ onNavigateHome }) {
 
   const addLog = useCallback((message, type = 'info') => {
     const timestamp = new Date().toLocaleTimeString();
-    setLogs(prev => [...prev.slice(-49), { timestamp, message, type }]);
+    setLogs(prev => [...prev.slice(-(LOGGING.MAX_LOG_ENTRIES - 1)), { timestamp, message, type }]);
   }, []);
 
   const sendCommand = useCallback((command, params = {}, uavId = null) => {
@@ -217,56 +216,34 @@ function MissionControl({ onNavigateHome }) {
   }, [selectedSwarm, uavs, sendCommand, addLog]);
 
   const handleMapClick = useCallback((lng, lat) => {
-    const metersToLng = 0.0001;
-    const metersToLat = 0.0001;
-    const baseCoords = { lng: -122.4961, lat: 37.5139 };
-
     // Convert map coordinates to simulator coordinates
-    const x = (lat - baseCoords.lat) / metersToLat;
-    const y = (lng - baseCoords.lng) / metersToLng;
+    const { x, y } = mapToSimulatorCoords(lng, lat);
 
-    console.log('=== MAP CLICK DEBUG ===');
-    console.log('selectedUavId:', selectedUavId);
-    console.log('selectedSwarm:', selectedSwarm);
-    console.log('Target coords:', { x, y });
-    console.log('All UAVs:', Object.keys(uavs));
-    console.log('WARNING: If both selections are null, click handler was not called or state did not update!');
+    logger.debug('Map clicked', { selectedUavId, selectedSwarm, x, y });
 
     // If individual UAV selected, move just that UAV
     if (selectedUavId) {
-      console.log('BRANCH: Moving individual UAV:', selectedUavId);
+      logger.debug('Moving individual UAV:', selectedUavId);
       moveSelectedUav(x, y);
       return;
     }
 
     // If swarm selected, move entire swarm in hexagonal formation
     if (selectedSwarm) {
-      console.log('BRANCH: Moving swarm:', selectedSwarm);
-      const swarmDrones = Object.entries(uavs).filter(([_, uav]) => {
-        console.log(`Checking ${_}: swarm=${uav.swarm}, match=${uav.swarm === selectedSwarm}`);
-        return uav.swarm === selectedSwarm;
-      });
-      console.log('Filtered swarm drones:', swarmDrones.map(([id]) => id));
+      logger.debug('Moving swarm:', selectedSwarm);
+      const swarmDrones = Object.entries(uavs).filter(([_, uav]) => uav.swarm === selectedSwarm);
       const targetZ = 150; // Standard flight altitude
 
       if (swarmDrones.length === 0) {
-        console.error('NO DRONES FOUND FOR SWARM:', selectedSwarm);
+        logger.error('No drones found for swarm:', selectedSwarm);
         addLog(`Error: No drones found for ${selectedSwarm}`, 'error');
         return;
       }
 
       // Calculate hexagonal formation positions around the clicked center point
-      const FORMATION_RADIUS = 30; // meters, same as backend
-      const hexPositions = [];
-      for (let i = 0; i < 6; i++) {
-        const angle = (i * 60) * (Math.PI / 180); // 60 degrees between each
-        hexPositions.push({
-          x: x + FORMATION_RADIUS * Math.cos(angle),
-          y: y + FORMATION_RADIUS * Math.sin(angle)
-        });
-      }
+      const hexPositions = getHexagonalFormation(x, y, targetZ, PHYSICS.FORMATION_RADIUS);
 
-      console.log(`Sending commands to ${swarmDrones.length} drones in hexagonal formation`);
+      logger.debug(`Sending commands to ${swarmDrones.length} drones in hexagonal formation`);
       swarmDrones.forEach(([uavId, uav], index) => {
         const currentZ = typeof uav?.position?.z === 'number' ? uav.position.z : 0;
         const flightZ = currentZ > 1 ? currentZ : targetZ;
@@ -276,23 +253,17 @@ function MissionControl({ onNavigateHome }) {
         const targetX = targetPos.x;
         const targetY = targetPos.y;
 
-        console.log(`[${index}] Processing ${uavId}: status=${uav.status}, z=${currentZ}, hex position=${index}`);
-
         if (uav.status !== 'flying') {
           // Arm and takeoff sequence
-          console.log(`  -> Arming and taking off ${uavId}`);
           sendCommand('arm', {}, uavId);
           setTimeout(() => {
-            console.log(`  -> Takeoff command for ${uavId}`);
             sendCommand('takeoff', { altitude: flightZ }, uavId);
           }, 200 + (index * 100)); // Stagger commands
           setTimeout(() => {
-            console.log(`  -> Goto command for ${uavId} to hex position`);
             sendCommand('goto', { x: targetX, y: targetY, z: flightZ }, uavId);
           }, 800 + (index * 100));
         } else {
           // Already flying, just move to hex position
-          console.log(`  -> Moving ${uavId} directly to hex position`);
           sendCommand('goto', { x: targetX, y: targetY, z: flightZ }, uavId);
         }
       });
@@ -301,7 +272,6 @@ function MissionControl({ onNavigateHome }) {
       return;
     }
 
-    console.log('BRANCH: No selection');
     addLog('Select a UAV or swarm first', 'warning');
   }, [selectedUavId, selectedSwarm, uavs, moveSelectedUav, sendCommand, addLog]);
 
@@ -311,47 +281,25 @@ function MissionControl({ onNavigateHome }) {
   }, [addLog]);
 
   const handleSwarmClick = useCallback((swarmName) => {
-    console.log('=== SWARM CLICK ===');
-    console.log('Clicking swarm:', swarmName);
-    console.log('Before - selectedSwarm:', selectedSwarm, 'selectedUavId:', selectedUavId);
-
     // If the same swarm is clicked again, just toggle expansion
     if (selectedSwarm === swarmName) {
-      console.log('Same swarm clicked - toggling expansion only');
-      setExpandedSwarms(prev => {
-        const newExpanded = { ...prev, [swarmName]: !prev[swarmName] };
-        console.log('New expanded state:', newExpanded);
-        return newExpanded;
-      });
+      setExpandedSwarms(prev => ({ ...prev, [swarmName]: !prev[swarmName] }));
       return;
     }
 
     // Otherwise, clear UAV selection and set swarm
     setSelectedUavId(null);
     setSelectedSwarm(swarmName);
-    setExpandedSwarms(prev => {
-      const newExpanded = { ...prev, [swarmName]: true }; // Always expand when selecting new swarm
-      console.log('New expanded state:', newExpanded);
-      return newExpanded;
-    });
+    setExpandedSwarms(prev => ({ ...prev, [swarmName]: true })); // Always expand when selecting new swarm
 
     addLog(`Selected ${swarmName}`);
-    console.log('Called setSelectedSwarm with:', swarmName);
   }, [selectedSwarm, selectedUavId, addLog]);
 
   const handleHornetClick = useCallback((uavId) => {
-    console.log('=== HORNET CLICK ===');
-    console.log('Clicked UAV:', uavId);
-    console.log('Current selectedUavId:', selectedUavId);
-    console.log('Current selectedSwarm:', selectedSwarm);
-
     // If the same UAV is clicked again, ignore
     if (selectedUavId === uavId) {
-      console.log('Same UAV already selected');
       return;
     }
-
-    console.log('Setting selectedUavId to:', uavId);
     setSelectedUavId(uavId);
     setSelectedSwarm(null);
     addLog(`Selected ${uavId}`);
@@ -368,7 +316,7 @@ function MissionControl({ onNavigateHome }) {
         addLog('ROI added');
       }
     } catch (error) {
-      console.error('Error adding ROI:', error);
+      logger.error('Error adding ROI:', error);
     }
   };
 
@@ -383,7 +331,7 @@ function MissionControl({ onNavigateHome }) {
         addLog('Target added');
       }
     } catch (error) {
-      console.error('Error adding target:', error);
+      logger.error('Error adding target:', error);
     }
   };
 
@@ -413,7 +361,7 @@ function MissionControl({ onNavigateHome }) {
         }
       }
     } catch (error) {
-      console.error('Error resetting positions:', error);
+      logger.error('Error resetting positions:', error);
       addLog('Failed to reset positions', 'error');
     }
   };
@@ -432,7 +380,7 @@ function MissionControl({ onNavigateHome }) {
         setCurrentWaypointIndex(prev => ({ ...prev, [swarmId]: waypointIndex }));
       }
     } catch (error) {
-      console.error('Error navigating to waypoint:', error);
+      logger.error('Error navigating to waypoint:', error);
       addLog('Failed to navigate to waypoint', 'error');
     }
   };
@@ -457,7 +405,7 @@ function MissionControl({ onNavigateHome }) {
           'SWARM-2': swarm2Data.waypoints || []
         });
       } catch (error) {
-        console.error('Error fetching waypoints:', error);
+        logger.error('Error fetching waypoints:', error);
       }
     };
 
@@ -568,7 +516,6 @@ function MissionControl({ onNavigateHome }) {
               className={`swarm-header ${selectedSwarm === swarmName ? 'selected' : ''}`}
               onClick={(e) => {
                 e.stopPropagation();
-                console.log('SWARM HEADER CLICKED:', swarmName);
                 handleSwarmClick(swarmName);
               }}
             >
@@ -578,35 +525,16 @@ function MissionControl({ onNavigateHome }) {
             </div>
 
             {expandedSwarms[swarmName] && hornets.map(([uavId, uav]) => (
-              <div
+              <HornetCard
                 key={uavId}
-                className={`hornet-box ${selectedUavId === uavId ? 'selected' : ''}`}
+                uavId={uavId}
+                uav={uav}
+                isSelected={selectedUavId === uavId}
                 onClick={(e) => {
                   e.stopPropagation();
-                  console.log('HORNET BOX CLICKED:', uavId);
                   handleHornetClick(uavId);
                 }}
-                style={{ borderLeftColor: uav.color }}
-              >
-                <div className="hornet-header">
-                  <div className="hornet-indicator" style={{ backgroundColor: uav.color }}></div>
-                  <h3>{uavId}</h3>
-                </div>
-                <div className="hornet-stats">
-                  <div className="stat-row">
-                    <span className="stat-label">Alt:</span>
-                    <span className="stat-value">{uav.position.z.toFixed(1)}m</span>
-                  </div>
-                  <div className="stat-row">
-                    <span className="stat-label">Status:</span>
-                    <span className={`stat-value status-${uav.status}`}>{uav.status}</span>
-                  </div>
-                  <div className="stat-row">
-                    <span className="stat-label">Battery:</span>
-                    <span className="stat-value">{uav.battery.toFixed(0)}%</span>
-                  </div>
-                </div>
-              </div>
+              />
             ))}
           </div>
         ))}

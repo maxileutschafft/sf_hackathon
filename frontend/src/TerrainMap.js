@@ -1,7 +1,10 @@
-import React, { useRef, useEffect, useState } from 'react';
+import React, { useRef, useEffect, useState, useMemo, useCallback } from 'react';
 import mapboxgl from 'mapbox-gl';
 import 'mapbox-gl/dist/mapbox-gl.css';
 import './TerrainMap.css';
+import { simulatorToMapCoords, METERS_TO_LNG, METERS_TO_LAT } from './utils/coordinateUtils';
+import { logger } from './utils/logger';
+import { throttle } from './utils/debounce';
 
 mapboxgl.accessToken = process.env.REACT_APP_MAPBOX_TOKEN || 'pk.eyJ1IjoibWFwYm94IiwiYSI6ImNpejY4M29iazA2Z2gycXA4N2pmbDZmangifQ.-g_vE53SD2WrJ6tFX7QHmA';
 
@@ -30,7 +33,7 @@ function TerrainMap({ uavs, selectedUavId, selectedSwarm, onSelectUav, onMapClic
   useEffect(() => {
     if (map.current) return;
 
-    console.log('Initializing map at Half Moon Bay Airport:', lng, lat);
+    logger.info('Initializing map at Half Moon Bay Airport:', lng, lat);
 
     map.current = new mapboxgl.Map({
       container: mapContainer.current,
@@ -44,7 +47,7 @@ function TerrainMap({ uavs, selectedUavId, selectedSwarm, onSelectUav, onMapClic
     });
 
     map.current.on('load', () => {
-      console.log('Map loaded successfully!');
+      logger.info('Map loaded successfully');
 
       // Add 3D terrain
       map.current.addSource('mapbox-dem', {
@@ -148,13 +151,11 @@ function TerrainMap({ uavs, selectedUavId, selectedSwarm, onSelectUav, onMapClic
         });
       }
 
-      console.log('3D terrain and boundary added');
+      logger.debug('3D terrain and boundary added');
     });
 
     // Add map click handler
     map.current.on('click', (e) => {
-      console.log('🗺️ MAP CLICKED IN TERRAINMAP');
-
       // Check if click is on a UAV pyramid layer
       const pyramidLayers = Object.keys(uavs).map(id => `uav-pyramid-${id}`).filter(layerId => {
         return map.current.getLayer(layerId);
@@ -164,20 +165,15 @@ function TerrainMap({ uavs, selectedUavId, selectedSwarm, onSelectUav, onMapClic
         layers: pyramidLayers
       });
 
-      console.log('🗺️ Features found:', features.length);
-      console.log('🗺️ onMapClickRef.current exists:', !!onMapClickRef.current);
-
       if (features.length === 0 && onMapClickRef.current) {
-        console.log('🗺️ Calling onMapClick callback with:', e.lngLat.lng, e.lngLat.lat);
+        logger.debug('Map clicked at:', e.lngLat.lng, e.lngLat.lat);
         onMapClickRef.current(e.lngLat.lng, e.lngLat.lat);
         setClickTarget({ lng: e.lngLat.lng, lat: e.lngLat.lat, timestamp: Date.now() });
-      } else {
-        console.log('🗺️ Not calling onMapClick - feature clicked or no callback');
       }
     });
 
-    // Add mousemove handler for cursor coordinates
-    map.current.on('mousemove', (e) => {
+    // Add mousemove handler for cursor coordinates (throttled)
+    const handleMouseMove = throttle((e) => {
       setCursorCoords({
         lng: e.lngLat.lng,
         lat: e.lngLat.lat
@@ -186,7 +182,9 @@ function TerrainMap({ uavs, selectedUavId, selectedSwarm, onSelectUav, onMapClic
         x: e.point.x,
         y: e.point.y
       });
-    });
+    }, 16); // Update at most every 16ms (60 FPS)
+    
+    map.current.on('mousemove', handleMouseMove);
 
     map.current.on('error', (e) => {
       console.error('Mapbox error:', e);
@@ -203,17 +201,9 @@ function TerrainMap({ uavs, selectedUavId, selectedSwarm, onSelectUav, onMapClic
   useEffect(() => {
     if (!map.current || !map.current.isStyleLoaded()) return;
 
-    // Conversion: 1 degree ≈ 111km at equator
-    // So 1m ≈ 0.000009 degrees, but we'll use 0.0001 for more visible movement
-    const metersToLng = 0.0001;
-    const metersToLat = 0.0001;
-
     Object.entries(uavs).forEach(([uavId, uav]) => {
-      const newLng = lng + (uav.position.y * metersToLng);
-      const newLat = lat + (uav.position.x * metersToLat);
+      const { lng: newLng, lat: newLat } = simulatorToMapCoords(uav.position.x, uav.position.y);
       const altitude = uav.position.z;
-
-      console.log(`Updating ${uavId}:`, { position: uav.position, mapCoords: [newLng, newLat], altitude });
 
       // Vertical cylinder from ground to UAV (2m diameter)
       const lineSourceId = `uav-line-${uavId}`;
@@ -375,13 +365,9 @@ function TerrainMap({ uavs, selectedUavId, selectedSwarm, onSelectUav, onMapClic
   useEffect(() => {
     if (!map.current || !map.current.isStyleLoaded()) return;
 
-    const metersToLng = 0.0001;
-    const metersToLat = 0.0001;
-
     rois.forEach((roi, index) => {
-      const roiLng = lng + (roi.y * metersToLng);
-      const roiLat = lat + (roi.x * metersToLat);
-      const radiusInDegrees = (roi.radius || 50) * metersToLng;
+      const { lng: roiLng, lat: roiLat } = simulatorToMapCoords(roi.x, roi.y);
+      const radiusInDegrees = (roi.radius || 50) * METERS_TO_LNG;
 
       const sourceId = `roi-${index}`;
       const layerId = `roi-circle-${index}`;
@@ -427,12 +413,8 @@ function TerrainMap({ uavs, selectedUavId, selectedSwarm, onSelectUav, onMapClic
   useEffect(() => {
     if (!map.current || !map.current.isStyleLoaded()) return;
 
-    const metersToLng = 0.0001;
-    const metersToLat = 0.0001;
-
     targets.forEach((target, index) => {
-      const targetLng = lng + (target.y * metersToLng);
-      const targetLat = lat + (target.x * metersToLat);
+      const { lng: targetLng, lat: targetLat } = simulatorToMapCoords(target.x, target.y);
 
       const sourceId = `target-${index}`;
       const layerId = `target-marker-${index}`;
@@ -558,9 +540,6 @@ function TerrainMap({ uavs, selectedUavId, selectedSwarm, onSelectUav, onMapClic
   useEffect(() => {
     if (!map.current || !map.current.isStyleLoaded()) return;
 
-    const metersToLng = 0.0001;
-    const metersToLat = 0.0001;
-
     // Group UAVs by swarm
     const swarmGroups = Object.entries(uavs).reduce((groups, [uavId, uav]) => {
       const swarmName = uav.swarm || 'UNASSIGNED';
@@ -612,10 +591,8 @@ function TerrainMap({ uavs, selectedUavId, selectedSwarm, onSelectUav, onMapClic
           const h1 = sortedHornets[i];
           const h2 = sortedHornets[(i + 1) % sortedHornets.length]; // Connect to next, wrapping around
 
-          const lng1 = lng + (h1.position.y * metersToLng);
-          const lat1 = lat + (h1.position.x * metersToLat);
-          const lng2 = lng + (h2.position.y * metersToLng);
-          const lat2 = lat + (h2.position.x * metersToLat);
+          const { lng: lng1, lat: lat1 } = simulatorToMapCoords(h1.position.x, h1.position.y);
+          const { lng: lng2, lat: lat2 } = simulatorToMapCoords(h2.position.x, h2.position.y);
 
           lines.push({
             type: 'Feature',
@@ -660,8 +637,7 @@ function TerrainMap({ uavs, selectedUavId, selectedSwarm, onSelectUav, onMapClic
         }
 
         // Add floating swarm label at center
-        const centerLng = lng + (formationCenterY * metersToLng);
-        const centerLat = lat + (formationCenterX * metersToLat);
+        const { lng: centerLng, lat: centerLat } = simulatorToMapCoords(formationCenterX, formationCenterY);
 
         if (!map.current.getSource(labelSourceId)) {
           map.current.addSource(labelSourceId, {
@@ -753,12 +729,8 @@ function TerrainMap({ uavs, selectedUavId, selectedSwarm, onSelectUav, onMapClic
       });
 
       // Re-add all UAV layers
-      const metersToLng = 0.0001;
-      const metersToLat = 0.0001;
-
       Object.entries(uavs).forEach(([uavId, uav]) => {
-        const newLng = lng + (uav.position.y * metersToLng);
-        const newLat = lat + (uav.position.x * metersToLat);
+        const { lng: newLng, lat: newLat } = simulatorToMapCoords(uav.position.x, uav.position.y);
         const altitude = uav.position.z;
 
         // Re-add vertical line

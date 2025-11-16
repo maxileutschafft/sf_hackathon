@@ -4,6 +4,19 @@ const WebSocket = require('ws');
 const cors = require('cors');
 const bodyParser = require('body-parser');
 
+// Configuration constants
+const DEBUG = process.env.NODE_ENV !== 'production';
+const FORMATION_RADIUS = 30; // meters - hexagonal formation radius
+const BOUNDARY_SIZE = 500; // meters - operational boundary
+
+// Logging utility
+const logger = {
+  debug: (...args) => DEBUG && console.log('[DEBUG]', ...args),
+  info: (...args) => console.log('[INFO]', ...args),
+  warn: (...args) => console.warn('[WARN]', ...args),
+  error: (...args) => console.error('[ERROR]', ...args)
+};
+
 const app = express();
 const server = http.createServer(app);
 
@@ -47,9 +60,6 @@ const swarmWaypoints = {
     { x: -50, y: 50, z: 0 }       // Waypoint 9: Return home
   ]
 };
-
-// Hexagonal formation radius
-const FORMATION_RADIUS = 30; // meters
 
 // Helper function: Calculate hexagonal positions around a center point
 function getHexagonalFormation(centerX, centerY, centerZ, radius = FORMATION_RADIUS) {
@@ -122,7 +132,7 @@ server.on('upgrade', (request, socket, head) => {
 
 // Client WebSocket connections (Frontend)
 wssClients.on('connection', (ws) => {
-  console.log('Client connected');
+  logger.info('Client connected');
   clients.add(ws);
 
   // Send current state of all UAVs to new client
@@ -145,9 +155,9 @@ wssClients.on('connection', (ws) => {
 
       // Forward command to specific UAV simulator
       if (simulatorWs && simulatorWs.readyState === WebSocket.OPEN) {
-        // minimal routing log
+        // Minimal routing log in debug mode
         if (data.type === 'command') {
-          console.log(`Route cmd ${data.command} -> ${uavId}`);
+          logger.debug(`Route cmd ${data.command} -> ${uavId}`);
         }
         simulatorWs.send(JSON.stringify(data));
       } else {
@@ -157,12 +167,12 @@ wssClients.on('connection', (ws) => {
         }));
       }
     } catch (error) {
-      console.error('Error parsing client message:', error);
+      logger.error('Error parsing client message:', error);
     }
   });
 
   ws.on('close', () => {
-    console.log('Client disconnected');
+    logger.info('Client disconnected');
     clients.delete(ws);
   });
 });
@@ -173,7 +183,7 @@ wssSimulator.on('connection', (ws, req) => {
   const url = new URL(req.url, 'http://localhost');
   const uavId = url.searchParams.get('id') || 'UAV-1';
 
-  console.log(`Simulator connected for ${uavId}`);
+  logger.info(`Simulator connected for ${uavId}`);
   simulatorConnections.set(uavId, ws);
 
   ws.on('message', (message) => {
@@ -197,8 +207,8 @@ wssSimulator.on('connection', (ws, req) => {
           }
         });
       } else {
-        // Log non-state messages
-        console.log(`Received from simulator ${uavId}:`, data.type);
+        // Log non-state messages in debug mode
+        logger.debug(`Received from simulator ${uavId}:`, data.type);
         // Forward other messages (command responses) to clients
         const message = { ...data, uavId };
         clients.forEach((client) => {
@@ -208,12 +218,12 @@ wssSimulator.on('connection', (ws, req) => {
         });
       }
     } catch (error) {
-      console.error('Error parsing simulator message:', error);
+      logger.error('Error parsing simulator message:', error);
     }
   });
 
   ws.on('close', () => {
-    console.log(`Simulator disconnected for ${uavId}`);
+    logger.info(`Simulator disconnected for ${uavId}`);
     simulatorConnections.delete(uavId);
   });
 });
@@ -388,7 +398,7 @@ app.post('/api/swarm-formation', (req, res) => {
 
   if (formation === 'hexagon' && swarmHornets.length === 6) {
     // Hexagonal formation with 6 drones
-    const radius = 30; // 30 meters from center
+    const radius = FORMATION_RADIUS;
     const positions = [];
 
     // Calculate hexagon positions
@@ -586,8 +596,8 @@ app.post('/api/swarm-waypoint', (req, res) => {
 // Start server
 const PORT = process.env.PORT || 3001;
 server.listen(PORT, () => {
-  console.log(`Backend server running on port ${PORT}`);
-  console.log(`WebSocket endpoints:`);
-  console.log(`  - Client: ws://localhost:${PORT}/ws/client`);
-  console.log(`  - Simulator: ws://localhost:${PORT}/ws/simulator`);
+  logger.info(`Backend server running on port ${PORT}`);
+  logger.info(`WebSocket endpoints:`);
+  logger.info(`  - Client: ws://localhost:${PORT}/ws/client`);
+  logger.info(`  - Simulator: ws://localhost:${PORT}/ws/simulator`);
 });
