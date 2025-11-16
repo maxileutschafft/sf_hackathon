@@ -194,6 +194,28 @@ function MissionPlanning({ onNavigateHome }) {
       saveMissionParams(targets, updatedOrigins, jammers);
       // Keep selection mode active - removed setIsSelectingOrigin(false);
     }
+
+    if (isSelectingJammer) {
+      // Convert lng/lat to x/y coordinates
+      const { x, y } = mapToSimulatorCoords(lng, lat);
+
+      const newJammer = {
+        id: `JAMMER-${jammerCounter}`,
+        name: `Jammer ${jammerCounter}`,
+        lng: lng,
+        lat: lat,
+        x: x,
+        y: y,
+        radius: 50, // Default radius in meters
+        createdAt: new Date().toISOString()
+      };
+
+      const updatedJammers = [...jammers, newJammer];
+      setJammers(updatedJammers);
+      setJammerCounter(jammerCounter + 1);
+      saveMissionParams(targets, origins, updatedJammers);
+      // Keep selection mode active
+    }
   };
 
   const handleDeleteTarget = (targetId) => {

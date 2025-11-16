@@ -29,18 +29,36 @@ function MissionControl({ onNavigateHome }) {
   const [showControls, setShowControls] = useState(false);
   const [rois, setRois] = useState([]);
   const [targets, setTargets] = useState([]);
+  const [origins, setOrigins] = useState([]);
+  const [jammers, setJammers] = useState([]);
   const [assemblyMode, setAssemblyMode] = useState(null);
   const [currentWaypointIndex, setCurrentWaypointIndex] = useState({});
   const wsRef = useRef(null);
 
   useEffect(() => {
     connectWebSocket();
+    loadMissionParams(); // Load markers on mount
     return () => {
       if (wsRef.current) {
         wsRef.current.close();
       }
     };
   }, []);
+
+  const loadMissionParams = async () => {
+    try {
+      const response = await fetch('http://localhost:3001/api/mission-params');
+      if (response.ok) {
+        const data = await response.json();
+        setTargets(data.targets || []);
+        setOrigins(data.origins || []);
+        setJammers(data.jammers || []);
+        logger.info('Loaded mission params:', data);
+      }
+    } catch (error) {
+      logger.error('Error loading mission params:', error);
+    }
+  };
 
   const connectWebSocket = () => {
     const wsUrl = process.env.REACT_APP_WS_URL || 'ws://localhost:3001/ws/client';
@@ -447,8 +465,11 @@ function MissionControl({ onNavigateHome }) {
         selectedSwarm={selectedSwarm}
         onSelectUav={handleHornetClick}
         onMapClick={handleMapClick}
+        onRefreshData={loadMissionParams}
         rois={rois}
         targets={targets}
+        origins={origins}
+        jammers={jammers}
         onToggleStyleReady={setOnToggleStyle}
         onToggle2DViewReady={setOnToggle2DView}
         assemblyMode={assemblyMode}
