@@ -690,7 +690,7 @@ function TerrainMap({ uavs, selectedUavId, selectedSwarm, onSelectUav, onMapClic
     } catch (error) {
       console.error('ERROR in trajectory visualization:', error);
     }
-  }, [trajectories, lng, lat, styleVersion, refreshCounter]);
+  }, [trajectories, lng, lat]);
 
   // Formation lines and swarm label
   useEffect(() => {
