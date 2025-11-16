@@ -87,6 +87,8 @@ function MissionPlanning({ onNavigateHome }) {
       });
       if (response.ok) {
         console.log('Mission params saved successfully');
+        // Reload data from backend to ensure consistency
+        await loadMissionParams();
       }
     } catch (error) {
       console.error('Error saving mission params:', error);
@@ -242,6 +244,7 @@ function MissionPlanning({ onNavigateHome }) {
         selectedSwarm={null}
         onSelectUav={() => {}}
         onMapClick={handleMapClick}
+        onRefreshData={loadMissionParams}
         isSelectingTarget={isSelectingTarget}
         isSelectingOrigin={isSelectingOrigin}
         isSelectingJammer={isSelectingJammer}

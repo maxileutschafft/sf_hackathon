@@ -8,7 +8,7 @@ mapboxgl.accessToken = process.env.REACT_APP_MAPBOX_TOKEN || 'pk.eyJ1IjoibWFwYm9
 const METERS_TO_LNG = 0.0001;
 const METERS_TO_LAT = 0.0001;
 
-function TerrainMap({ uavs, selectedUavId, selectedSwarm, onSelectUav, onMapClick, rois, targets, origins = [], jammers = [], onToggleStyleReady, onToggle2DViewReady, assemblyMode, isSelectingTarget, isSelectingOrigin, isSelectingJammer, onJammerCreated }) {
+function TerrainMap({ uavs, selectedUavId, selectedSwarm, onSelectUav, onMapClick, onRefreshData, rois, targets, origins = [], jammers = [], onToggleStyleReady, onToggle2DViewReady, assemblyMode, isSelectingTarget, isSelectingOrigin, isSelectingJammer, onJammerCreated }) {
   const mapContainer = useRef(null);
   const map = useRef(null);
   // Base position: lat 37.5139, lng -122.4961
@@ -21,6 +21,7 @@ function TerrainMap({ uavs, selectedUavId, selectedSwarm, onSelectUav, onMapClic
   const [styleVersion, setStyleVersion] = useState(0);
   const [cursorCoords, setCursorCoords] = useState(null);
   const [cursorPixelPos, setCursorPixelPos] = useState(null);
+  const [refreshCounter, setRefreshCounter] = useState(0);
   
   // Jammer creation - no longer needed for click-based approach
 
@@ -165,6 +166,13 @@ function TerrainMap({ uavs, selectedUavId, selectedSwarm, onSelectUav, onMapClic
     map.current.on('click', (e) => {
       // Debug: log click events to help trace selection issues
       console.log('Map clicked at pixel:', e.point, 'lngLat:', e.lngLat);
+      
+      // Force refresh all markers on every click by reloading data from backend
+      if (onRefreshData) {
+        console.log('Refreshing mission data from backend...');
+        onRefreshData();
+      }
+      setRefreshCounter(prev => prev + 1);
 
       // Check if click is on a UAV layer
       const uavLayerList = Object.keys(uavs).map(id => `uav-point-${id}`);
@@ -375,22 +383,65 @@ function TerrainMap({ uavs, selectedUavId, selectedSwarm, onSelectUav, onMapClic
     });
   }, [rois, lng, lat, styleVersion]);
 
-  // Target markers visualization
+  // UNIFIED MARKER VISUALIZATION - Re-render ALL markers on every update
   useEffect(() => {
     if (!map.current || !map.current.isStyleLoaded()) return;
 
-    const activeTargetIds = new Set();
+    console.log('=== UNIFIED MARKER EFFECT ===');
+    console.log('Targets:', targets?.length || 0, targets);
+    console.log('Origins:', origins?.length || 0, origins);
+    console.log('Jammers:', jammers?.length || 0, jammers);
 
-    targets.forEach((target, index) => {
-      const markerId = target.id || `target-${index}`;
-      activeTargetIds.add(markerId);
-      const [targetLng, targetLat] = convertPointToLngLat(target);
-      const altitude = typeof target.z === 'number' ? target.z : 0;
+    // STEP 1: Remove ALL existing marker layers and sources
+    const style = map.current.getStyle();
+    if (style?.layers) {
+      const layersToRemove = [];
+      const sourcesToRemove = [];
 
-      const lineSourceId = `target-line-${markerId}`;
-      const pointSourceId = `target-point-${markerId}`;
+      style.layers.forEach(layer => {
+        if (layer.id.startsWith('target-') || 
+            layer.id.startsWith('origin-') || 
+            layer.id.startsWith('jammer-')) {
+          layersToRemove.push(layer.id);
+        }
+      });
 
-      if (!map.current.getSource(lineSourceId)) {
+      // Remove layers first
+      layersToRemove.forEach(layerId => {
+        if (map.current.getLayer(layerId)) {
+          map.current.removeLayer(layerId);
+        }
+      });
+
+      // Then remove sources
+      Object.keys(style.sources).forEach(sourceId => {
+        if (sourceId.startsWith('target-') || 
+            sourceId.startsWith('origin-') || 
+            sourceId.startsWith('jammer-')) {
+          sourcesToRemove.push(sourceId);
+        }
+      });
+
+      sourcesToRemove.forEach(sourceId => {
+        if (map.current.getSource(sourceId)) {
+          map.current.removeSource(sourceId);
+        }
+      });
+
+      console.log('Removed', layersToRemove.length, 'layers and', sourcesToRemove.length, 'sources');
+    }
+
+    // STEP 2: Add ALL target markers (RED)
+    if (targets && targets.length > 0) {
+      targets.forEach((target, index) => {
+        const markerId = target.id || `target-${index}`;
+        const [targetLng, targetLat] = convertPointToLngLat(target);
+        const altitude = typeof target.z === 'number' ? target.z : 0;
+
+        const lineSourceId = `target-line-${markerId}`;
+        const pointSourceId = `target-point-${markerId}`;
+
+        // Add line
         map.current.addSource(lineSourceId, {
           type: 'geojson',
           data: {
@@ -415,20 +466,8 @@ function TerrainMap({ uavs, selectedUavId, selectedSwarm, onSelectUav, onMapClic
             'line-opacity': 0.7
           }
         });
-      } else {
-        map.current.getSource(lineSourceId).setData({
-          type: 'Feature',
-          geometry: {
-            type: 'LineString',
-            coordinates: [
-              [targetLng, targetLat, 0],
-              [targetLng, targetLat, altitude]
-            ]
-          }
-        });
-      }
 
-      if (!map.current.getSource(pointSourceId)) {
+        // Add point
         map.current.addSource(pointSourceId, {
           type: 'geojson',
           data: {
@@ -452,52 +491,22 @@ function TerrainMap({ uavs, selectedUavId, selectedSwarm, onSelectUav, onMapClic
             'circle-opacity': 1
           }
         });
-      } else {
-        map.current.getSource(pointSourceId).setData({
-          type: 'Feature',
-          geometry: {
-            type: 'Point',
-            coordinates: [targetLng, targetLat, altitude]
-          }
-        });
-      }
-    });
 
-    // Clean up removed target markers
-    const style = map.current.getStyle();
-    if (style?.layers) {
-      style.layers.forEach(layer => {
-        if (layer.id.startsWith('target-line-') || layer.id.startsWith('target-point-')) {
-          const markerId = layer.id.replace('target-line-', '').replace('target-point-', '');
-          if (!activeTargetIds.has(markerId)) {
-            if (map.current.getLayer(layer.id)) {
-              map.current.removeLayer(layer.id);
-            }
-            if (map.current.getSource(layer.id)) {
-              map.current.removeSource(layer.id);
-            }
-          }
-        }
+        console.log('Added target:', markerId, 'at', targetLng, targetLat);
       });
     }
-  }, [targets, lng, lat, styleVersion]);
 
-  // Origin markers visualization (green markers)
-  useEffect(() => {
-    if (!map.current || !map.current.isStyleLoaded() || !origins) return;
-    const activeOriginIds = new Set();
+    // STEP 3: Add ALL origin markers (GREEN)
+    if (origins && origins.length > 0) {
+      origins.forEach((origin, index) => {
+        const markerId = origin.id || `origin-${index}`;
+        const [originLng, originLat] = convertPointToLngLat(origin);
+        const altitude = typeof origin.z === 'number' ? origin.z : 0;
 
-    origins.forEach((origin, index) => {
-      const markerId = origin.id || `origin-${index}`;
-      activeOriginIds.add(markerId);
+        const lineSourceId = `origin-line-${markerId}`;
+        const pointSourceId = `origin-point-${markerId}`;
 
-      const [originLng, originLat] = convertPointToLngLat(origin);
-      const altitude = typeof origin.z === 'number' ? origin.z : 0;
-
-      const lineSourceId = `origin-line-${markerId}`;
-      const pointSourceId = `origin-point-${markerId}`;
-
-      if (!map.current.getSource(lineSourceId)) {
+        // Add line
         map.current.addSource(lineSourceId, {
           type: 'geojson',
           data: {
@@ -522,20 +531,8 @@ function TerrainMap({ uavs, selectedUavId, selectedSwarm, onSelectUav, onMapClic
             'line-opacity': 0.7
           }
         });
-      } else {
-        map.current.getSource(lineSourceId).setData({
-          type: 'Feature',
-          geometry: {
-            type: 'LineString',
-            coordinates: [
-              [originLng, originLat, 0],
-              [originLng, originLat, altitude]
-            ]
-          }
-        });
-      }
 
-      if (!map.current.getSource(pointSourceId)) {
+        // Add point
         map.current.addSource(pointSourceId, {
           type: 'geojson',
           data: {
@@ -559,55 +556,25 @@ function TerrainMap({ uavs, selectedUavId, selectedSwarm, onSelectUav, onMapClic
             'circle-opacity': 1
           }
         });
-      } else {
-        map.current.getSource(pointSourceId).setData({
-          type: 'Feature',
-          geometry: {
-            type: 'Point',
-            coordinates: [originLng, originLat, altitude]
-          }
-        });
-      }
-    });
 
-    const style = map.current.getStyle();
-    if (style?.layers) {
-      style.layers.forEach(layer => {
-        if (layer.id.startsWith('origin-line-') || layer.id.startsWith('origin-point-')) {
-          const markerId = layer.id.replace('origin-line-', '').replace('origin-point-', '');
-          if (!activeOriginIds.has(markerId)) {
-            if (map.current.getLayer(layer.id)) {
-              map.current.removeLayer(layer.id);
-            }
-            if (map.current.getSource(layer.id)) {
-              map.current.removeSource(layer.id);
-            }
-          }
-        }
+        console.log('Added origin:', markerId, 'at', originLng, originLat);
       });
     }
-  }, [origins, lng, lat, styleVersion]);
 
-  // Jammer zones visualization (transparent orange circles)
-  useEffect(() => {
-    if (!map.current || !map.current.isStyleLoaded()) return;
+    // STEP 4: Add ALL jammer zones (ORANGE CIRCLES)
+    if (jammers && jammers.length > 0) {
+      jammers.forEach((jammer, index) => {
+        const markerId = jammer.id || `jammer-${index}`;
+        const [jammerLng, jammerLat] = convertPointToLngLat(jammer);
+        const radiusInMeters = jammer.radius || 50;
 
-    const activeJammerIds = new Set();
+        const sourceId = `jammer-${markerId}`;
+        const layerId = `jammer-circle-${markerId}`;
+        const outlineLayerId = `jammer-outline-${markerId}`;
 
-    jammers.forEach((jammer, index) => {
-      const markerId = jammer.id || `jammer-${index}`;
-      activeJammerIds.add(markerId);
+        // Create polygon circle
+        const circleCoords = createCirclePolygon(jammerLng, jammerLat, radiusInMeters);
 
-      const [jammerLng, jammerLat] = convertPointToLngLat(jammer);
-      const radiusInMeters = jammer.radius || 50;
-
-      const sourceId = `jammer-${markerId}`;
-      const layerId = `jammer-circle-${markerId}`;
-
-      // Create a polygon circle with the correct radius in meters
-      const circleCoords = createCirclePolygon(jammerLng, jammerLat, radiusInMeters);
-
-      if (!map.current.getSource(sourceId)) {
         map.current.addSource(sourceId, {
           type: 'geojson',
           data: {
@@ -629,8 +596,6 @@ function TerrainMap({ uavs, selectedUavId, selectedSwarm, onSelectUav, onMapClic
           }
         });
 
-        // Add circle outline
-        const outlineLayerId = `jammer-outline-${markerId}`;
         map.current.addLayer({
           id: outlineLayerId,
           type: 'line',
@@ -641,47 +606,13 @@ function TerrainMap({ uavs, selectedUavId, selectedSwarm, onSelectUav, onMapClic
             'line-opacity': 0.8
           }
         });
-      } else {
-        // Update existing circle with new radius
-        map.current.getSource(sourceId).setData({
-          type: 'Feature',
-          geometry: {
-            type: 'Polygon',
-            coordinates: [circleCoords]
-          }
-        });
-      }
-    });
 
-    // Clean up removed jammer zones
-    const style = map.current.getStyle();
-    if (style?.layers) {
-      style.layers.forEach(layer => {
-        if (layer.id.startsWith('jammer-circle-') || layer.id.startsWith('jammer-outline-')) {
-          const markerId = layer.id.replace('jammer-circle-', '').replace('jammer-outline-', '');
-          if (!activeJammerIds.has(markerId)) {
-            if (map.current.getLayer(layer.id)) {
-              map.current.removeLayer(layer.id);
-            }
-          }
-        }
-      });
-      
-      // Clean up sources
-      const sources = map.current.getStyle().sources;
-      Object.keys(sources).forEach(sourceId => {
-        if (sourceId.startsWith('jammer-')) {
-          const markerId = sourceId.replace('jammer-', '');
-          if (!activeJammerIds.has(markerId)) {
-            if (map.current.getSource(sourceId)) {
-              map.current.removeSource(sourceId);
-            }
-          }
-        }
+        console.log('Added jammer:', markerId, 'at', jammerLng, jammerLat, 'radius:', radiusInMeters);
       });
     }
-  }, [jammers, lng, lat, styleVersion]);
 
+    console.log('=== MARKER RENDERING COMPLETE ===');
+  }, [targets, origins, jammers, lng, lat, styleVersion, refreshCounter]);
 
   // Formation lines and swarm label
   useEffect(() => {
