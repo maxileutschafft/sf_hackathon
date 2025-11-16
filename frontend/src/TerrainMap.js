@@ -629,11 +629,17 @@ function TerrainMap({ uavs, selectedUavId, selectedSwarm, onSelectUav, onMapClic
         const [jammerLng, jammerLat] = convertPointToLngLat(jammer);
         const radiusInMeters = jammer.radius || 200;
 
+        logger.debug('=== RENDERING JAMMER ===');
+        logger.debug('Jammer ID:', markerId);
+        logger.debug('Position:', jammerLng, jammerLat);
+        logger.debug('Radius (meters):', radiusInMeters);
+        logger.debug('Jammer object:', jammer);
+
         const sourceId = `jammer-${markerId}`;
         const layerId = `jammer-circle-${markerId}`;
         const outlineLayerId = `jammer-outline-${markerId}`;
 
-        // Create polygon circle
+        // Create polygon circle with correct radius
         const circleCoords = createCirclePolygon(jammerLng, jammerLat, radiusInMeters);
 
         map.current.addSource(sourceId, {
@@ -665,6 +671,32 @@ function TerrainMap({ uavs, selectedUavId, selectedSwarm, onSelectUav, onMapClic
             'line-color': '#ff8c00',
             'line-width': 2,
             'line-opacity': 0.8
+          }
+        });
+
+        // Add center point marker for jammer
+        const centerSourceId = `jammer-center-${markerId}`;
+        map.current.addSource(centerSourceId, {
+          type: 'geojson',
+          data: {
+            type: 'Feature',
+            geometry: {
+              type: 'Point',
+              coordinates: [jammerLng, jammerLat]
+            }
+          }
+        });
+
+        map.current.addLayer({
+          id: `jammer-center-${markerId}`,
+          type: 'circle',
+          source: centerSourceId,
+          paint: {
+            'circle-radius': 8,
+            'circle-color': '#ff8c00',
+            'circle-stroke-width': 2,
+            'circle-stroke-color': '#ffffff',
+            'circle-opacity': 1
           }
         });
 

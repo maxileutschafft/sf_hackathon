@@ -20,19 +20,50 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
+def haversine_distance(lat1, lng1, lat2, lng2):
+    """Calculate great-circle distance between two lat/lng points in meters."""
+    R = 6371000  # Earth radius in meters
+    phi1 = math.radians(lat1)
+    phi2 = math.radians(lat2)
+    dphi = math.radians(lat2 - lat1)
+    dlambda = math.radians(lng2 - lng1)
+    
+    a = math.sin(dphi/2)**2 + math.cos(phi1) * math.cos(phi2) * math.sin(dlambda/2)**2
+    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
+    
+    return R * c
+
+
 def euclidean_distance(p1, p2):
     """Calculate Euclidean distance between two points."""
     return math.sqrt((p1[0] - p2[0])**2 + (p1[1] - p2[1])**2)
 
 
-def is_point_in_jammer(point, jammers):
-    """Check if a point is inside any jammer area."""
-    x, y = point
-    for jammer in jammers:
-        jx, jy = jammer['center']
-        radius = jammer['radius']
-        if euclidean_distance((x, y), (jx, jy)) <= radius:
-            return True
+def is_point_in_jammer(point, jammers, use_latlng=False):
+    """
+    Check if a point is inside any jammer area.
+    
+    Args:
+        point: (x, y) or (lat, lng) depending on use_latlng
+        jammers: list of jammer dicts with 'center', 'radius', and optionally 'center_latlng'
+        use_latlng: if True, use geographic distance; if False, use Euclidean distance
+    """
+    if use_latlng:
+        lat, lng = point
+        for jammer in jammers:
+            if 'center_latlng' in jammer:
+                jlat, jlng = jammer['center_latlng']
+                radius = jammer['radius']
+                distance = haversine_distance(lat, lng, jlat, jlng)
+                if distance <= radius:
+                    return True
+    else:
+        x, y = point
+        for jammer in jammers:
+            jx, jy = jammer['center']
+            radius = jammer['radius']
+            if euclidean_distance((x, y), (jx, jy)) <= radius:
+                return True
     return False
 
 
@@ -160,14 +191,49 @@ def plan_astar_path(origin, target, jammers):
     origin_pos = (origin['x'], origin['y'])
     target_pos = (target['x'], target['y'])
     
-    # Convert jammers to A* format
+    # CRITICAL FIX: Calculate the actual scale factor for this coordinate system
+    # The x/y values are NOT in meters, they're in a scaled coordinate system
+    # where 0.0001 degrees ≈ 11 meters (varies by latitude)
+    
+    # Calculate actual distance in meters using lat/lng
+    if 'lat' in origin and 'lng' in origin and 'lat' in target and 'lng' in target:
+        actual_distance_meters = haversine_distance(
+            origin['lat'], origin['lng'], 
+            target['lat'], target['lng']
+        )
+        # Calculate distance in the x/y coordinate system
+        xy_distance = euclidean_distance(origin_pos, target_pos)
+        
+        # Calculate scale factor: how many coordinate units per meter
+        if xy_distance > 0:
+            scale_factor = xy_distance / actual_distance_meters
+            logger.info(f"Scale factor: {scale_factor:.6f} coordinate units per meter")
+        else:
+            scale_factor = 0.0001  # fallback to approximate value
+            logger.warning("Could not calculate scale factor, using default")
+    else:
+        scale_factor = 0.0001  # fallback
+        logger.warning("Missing lat/lng, using approximate scale factor")
+    
+    # Convert jammers to A* format with SCALED radius
     jammer_list = []
     for jammer in jammers:
         if 'x' in jammer and 'y' in jammer and 'radius' in jammer:
-            jammer_list.append({
+            # Scale the radius from meters to coordinate system units
+            radius_in_coords = jammer['radius'] * scale_factor
+            
+            jammer_dict = {
                 'center': (jammer['x'], jammer['y']),
-                'radius': jammer['radius']
-            })
+                'radius': radius_in_coords  # Now in coordinate units, not meters!
+            }
+            
+            # Also store lat/lng center for verification
+            if 'lat' in jammer and 'lng' in jammer:
+                jammer_dict['center_latlng'] = (jammer['lat'], jammer['lng'])
+            
+            jammer_list.append(jammer_dict)
+            logger.info(f"Jammer at ({jammer['x']:.2f}, {jammer['y']:.2f}), "
+                       f"radius {jammer['radius']}m = {radius_in_coords:.2f} coords")
     
     # Determine grid size based on origin, target, and jammers
     all_x = [origin_pos[0], target_pos[0]]
@@ -175,7 +241,7 @@ def plan_astar_path(origin, target, jammers):
     
     for jammer in jammer_list:
         jx, jy = jammer['center']
-        r = jammer['radius']
+        r = jammer['radius']  # Already scaled to coordinate units
         all_x.extend([jx - r, jx + r])
         all_y.extend([jy - r, jy + r])
     
@@ -300,20 +366,37 @@ def plan_mission():
                     logger.warning(f"No path found from {origin.get('id')} to {target.get('id')}")
                     continue
                 
-                # Calculate statistics
-                path_length = sum(
-                    euclidean_distance((waypoints[j]['x'], waypoints[j]['y']), 
-                                     (waypoints[j+1]['x'], waypoints[j+1]['y']))
-                    for j in range(len(waypoints) - 1)
-                )
+                # Calculate statistics using geographic distances
+                if 'lat' in origin and 'lng' in origin and 'lat' in target and 'lng' in target:
+                    # Calculate actual path length in meters using lat/lng
+                    path_length = 0
+                    for j in range(len(waypoints) - 1):
+                        if 'lat' in waypoints[j] and 'lng' in waypoints[j] and 'lat' in waypoints[j+1] and 'lng' in waypoints[j+1]:
+                            path_length += haversine_distance(
+                                waypoints[j]['lat'], waypoints[j]['lng'],
+                                waypoints[j+1]['lat'], waypoints[j+1]['lng']
+                            )
+                else:
+                    # Fallback to coordinate distance
+                    path_length = sum(
+                        euclidean_distance((waypoints[j]['x'], waypoints[j]['y']), 
+                                         (waypoints[j+1]['x'], waypoints[j+1]['y']))
+                        for j in range(len(waypoints) - 1)
+                    )
                 
-                # Count waypoints in jammer zones
-                jammer_list = [{'center': (j['x'], j['y']), 'radius': j['radius']} 
-                              for j in jammers if 'x' in j and 'y' in j and 'radius' in j]
-                steps_in_jammer = sum(
-                    1 for wp in waypoints 
-                    if is_point_in_jammer((wp['x'], wp['y']), jammer_list)
-                )
+                # Count waypoints in jammer zones using geographic distance
+                steps_in_jammer = 0
+                for wp in waypoints:
+                    if 'lat' in wp and 'lng' in wp:
+                        for jammer in jammers:
+                            if 'lat' in jammer and 'lng' in jammer and 'radius' in jammer:
+                                distance = haversine_distance(
+                                    wp['lat'], wp['lng'],
+                                    jammer['lat'], jammer['lng']
+                                )
+                                if distance <= jammer['radius']:
+                                    steps_in_jammer += 1
+                                    break  # Count each waypoint only once
                 
                 trajectory = {
                     'origin_id': origin.get('id', f'origin-{i}'),
