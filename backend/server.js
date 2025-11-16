@@ -723,6 +723,111 @@ app.post('/api/mission-params', (req, res) => {
   }
 });
 
+// Mission management endpoints - for saving/loading complete missions
+const missionsDir = path.join(__dirname, 'missions');
+if (!fs.existsSync(missionsDir)) {
+  fs.mkdirSync(missionsDir, { recursive: true });
+}
+
+// Get list of all saved missions
+app.get('/api/missions', (req, res) => {
+  try {
+    const files = fs.readdirSync(missionsDir);
+    const missions = files
+      .filter(f => f.endsWith('.json'))
+      .map(f => {
+        const filePath = path.join(missionsDir, f);
+        const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+        return {
+          id: data.id,
+          name: data.name,
+          timestamp: data.timestamp,
+          description: data.description,
+          stats: {
+            origins: data.origins?.length || 0,
+            targets: data.targets?.length || 0,
+            jammers: data.jammers?.length || 0,
+            trajectories: data.trajectories?.length || 0
+          }
+        };
+      })
+      .sort((a, b) => b.timestamp - a.timestamp); // Most recent first
+    
+    res.json({ missions });
+  } catch (error) {
+    logger.error('Error listing missions:', error);
+    res.status(500).json({ error: 'Failed to list missions', message: error.message });
+  }
+});
+
+// Get specific mission by ID
+app.get('/api/missions/:id', (req, res) => {
+  try {
+    const filePath = path.join(missionsDir, `${req.params.id}.json`);
+    
+    if (!fs.existsSync(filePath)) {
+      return res.status(404).json({ error: 'Mission not found' });
+    }
+    
+    const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+    res.json(data);
+  } catch (error) {
+    logger.error('Error loading mission:', error);
+    res.status(500).json({ error: 'Failed to load mission', message: error.message });
+  }
+});
+
+// Save a new mission
+app.post('/api/missions', (req, res) => {
+  try {
+    const { name, origins, targets, jammers, trajectories, waypointPayload, description } = req.body;
+    
+    if (!name) {
+      return res.status(400).json({ error: 'Mission name is required' });
+    }
+    
+    const missionId = `mission_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    const missionData = {
+      id: missionId,
+      name,
+      description: description || '',
+      timestamp: Date.now(),
+      origins: origins || [],
+      targets: targets || [],
+      jammers: jammers || [],
+      trajectories: trajectories || [],
+      waypointPayload: waypointPayload || null
+    };
+    
+    const filePath = path.join(missionsDir, `${missionId}.json`);
+    fs.writeFileSync(filePath, JSON.stringify(missionData, null, 2));
+    
+    logger.info(`Mission saved: ${name} (${missionId})`);
+    res.json({ success: true, id: missionId, message: 'Mission saved successfully' });
+  } catch (error) {
+    logger.error('Error saving mission:', error);
+    res.status(500).json({ error: 'Failed to save mission', message: error.message });
+  }
+});
+
+// Delete a mission
+app.delete('/api/missions/:id', (req, res) => {
+  try {
+    const filePath = path.join(missionsDir, `${req.params.id}.json`);
+    
+    if (!fs.existsSync(filePath)) {
+      return res.status(404).json({ error: 'Mission not found' });
+    }
+    
+    fs.unlinkSync(filePath);
+    logger.info(`Mission deleted: ${req.params.id}`);
+    res.json({ success: true, message: 'Mission deleted successfully' });
+  } catch (error) {
+    logger.error('Error deleting mission:', error);
+    res.status(500).json({ error: 'Failed to delete mission', message: error.message });
+  }
+});
+
 // Start server
 const PORT = process.env.PORT || 3001;
 server.listen(PORT, () => {

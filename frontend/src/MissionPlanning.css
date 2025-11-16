@@ -122,6 +122,23 @@
   cursor: not-allowed;
 }
 
+.planning-sidebar .topology-toggle-btn.save-mission-btn {
+  background: rgba(0, 255, 136, 0.1);
+  border-color: rgba(0, 255, 136, 0.5);
+  color: #00ff88;
+  font-weight: 700;
+}
+
+.planning-sidebar .topology-toggle-btn.save-mission-btn:hover:not(:disabled) {
+  background: rgba(0, 255, 136, 0.2);
+  box-shadow: 0 0 20px rgba(0, 255, 136, 0.5);
+}
+
+.planning-sidebar .topology-toggle-btn.save-mission-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
 @keyframes pulse {
   0%, 100% {
     box-shadow: 0 0 20px rgba(138, 43, 226, 0.7);

@@ -225,6 +225,23 @@ class UAVSimulator:
             else:
                 response['message'] = 'Cannot goto (not flying)'
 
+        elif command == 'teleport':
+            # Instant teleport to position (no flying required)
+            x = params.get('x', self.position['x'])
+            y = params.get('y', self.position['y'])
+            z = params.get('z', self.position['z'])
+
+            self.position = {
+                'x': x,
+                'y': y,
+                'z': max(0, z)
+            }
+            self.velocity = {'x': 0, 'y': 0, 'z': 0}
+            self.target_position = None
+            
+            response['success'] = True
+            response['message'] = f'Teleported to position ({x}, {y}, {z})'
+
         else:
             response['message'] = f'Unknown command: {command}'
         
