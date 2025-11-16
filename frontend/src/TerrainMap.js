@@ -669,51 +669,268 @@ function TerrainMap({ uavs, selectedUavId, selectedSwarm, onSelectUav, onMapClic
     });
   }, [rois, lng, lat]);
 
-  // Target markers visualization
+  // UNIFIED MARKER VISUALIZATION - Re-render ALL markers on every update
   useEffect(() => {
     if (!map.current || !map.current.isStyleLoaded()) return;
 
-    targets.forEach((target, index) => {
-      const { lng: targetLng, lat: targetLat } = simulatorToMapCoords(target.x, target.y);
+    logger.debug('=== UNIFIED MARKER EFFECT ===');
+    logger.debug('Targets:', targets?.length || 0, targets);
+    logger.debug('Origins:', origins?.length || 0, origins);
+    logger.debug('Jammers:', jammers?.length || 0, jammers);
 
-      const sourceId = `target-${index}`;
-      const layerId = `target-marker-${index}`;
+    // STEP 1: Remove ALL existing marker layers and sources
+    const style = map.current.getStyle();
+    if (style?.layers) {
+      const layersToRemove = [];
+      const sourcesToRemove = [];
 
-      if (!map.current.getSource(sourceId)) {
-        map.current.addSource(sourceId, {
+      style.layers.forEach(layer => {
+        if (layer.id.startsWith('target-') || 
+            layer.id.startsWith('origin-') || 
+            layer.id.startsWith('jammer-')) {
+          layersToRemove.push(layer.id);
+        }
+      });
+
+      // Remove layers first
+      layersToRemove.forEach(layerId => {
+        if (map.current.getLayer(layerId)) {
+          map.current.removeLayer(layerId);
+        }
+      });
+
+      // Then remove sources
+      Object.keys(style.sources).forEach(sourceId => {
+        if (sourceId.startsWith('target-') || 
+            sourceId.startsWith('origin-') || 
+            sourceId.startsWith('jammer-')) {
+          sourcesToRemove.push(sourceId);
+        }
+      });
+
+      sourcesToRemove.forEach(sourceId => {
+        if (map.current.getSource(sourceId)) {
+          map.current.removeSource(sourceId);
+        }
+      });
+
+      logger.debug('Removed', layersToRemove.length, 'layers and', sourcesToRemove.length, 'sources');
+    }
+
+    // STEP 2: Add ALL target markers (RED)
+    if (targets && targets.length > 0) {
+      targets.forEach((target, index) => {
+        const markerId = target.id || `target-${index}`;
+        const [targetLng, targetLat] = convertPointToLngLat(target);
+        const altitude = typeof target.z === 'number' ? target.z : 0;
+
+        const lineSourceId = `target-line-${markerId}`;
+        const pointSourceId = `target-point-${markerId}`;
+
+        // Add line
+        map.current.addSource(lineSourceId, {
+          type: 'geojson',
+          data: {
+            type: 'Feature',
+            geometry: {
+              type: 'LineString',
+              coordinates: [
+                [targetLng, targetLat, 0],
+                [targetLng, targetLat, altitude]
+              ]
+            }
+          }
+        });
+
+        map.current.addLayer({
+          id: `target-line-${markerId}`,
+          type: 'line',
+          source: lineSourceId,
+          paint: {
+            'line-color': '#ff0000',
+            'line-width': 3,
+            'line-opacity': 0.7
+          }
+        });
+
+        // Add point
+        map.current.addSource(pointSourceId, {
           type: 'geojson',
           data: {
             type: 'Feature',
             geometry: {
               type: 'Point',
-              coordinates: [targetLng, targetLat, 0]
+              coordinates: [targetLng, targetLat, altitude]
+            }
+          }
+        });
+
+        map.current.addLayer({
+          id: `target-point-${markerId}`,
+          type: 'circle',
+          source: pointSourceId,
+          paint: {
+            'circle-radius': 12,
+            'circle-color': '#ff0000',
+            'circle-stroke-width': 3,
+            'circle-stroke-color': '#ffffff',
+            'circle-opacity': 1
+          }
+        });
+
+        logger.debug('Added target:', markerId, 'at', targetLng, targetLat);
+      });
+    }
+
+    // STEP 3: Add ALL origin markers (GREEN)
+    if (origins && origins.length > 0) {
+      origins.forEach((origin, index) => {
+        const markerId = origin.id || `origin-${index}`;
+        const [originLng, originLat] = convertPointToLngLat(origin);
+        const altitude = typeof origin.z === 'number' ? origin.z : 0;
+
+        const lineSourceId = `origin-line-${markerId}`;
+        const pointSourceId = `origin-point-${markerId}`;
+
+        // Add line
+        map.current.addSource(lineSourceId, {
+          type: 'geojson',
+          data: {
+            type: 'Feature',
+            geometry: {
+              type: 'LineString',
+              coordinates: [
+                [originLng, originLat, 0],
+                [originLng, originLat, altitude]
+              ]
+            }
+          }
+        });
+
+        map.current.addLayer({
+          id: `origin-line-${markerId}`,
+          type: 'line',
+          source: lineSourceId,
+          paint: {
+            'line-color': '#00ff00',
+            'line-width': 3,
+            'line-opacity': 0.7
+          }
+        });
+
+        // Add point
+        map.current.addSource(pointSourceId, {
+          type: 'geojson',
+          data: {
+            type: 'Feature',
+            geometry: {
+              type: 'Point',
+              coordinates: [originLng, originLat, altitude]
+            }
+          }
+        });
+
+        map.current.addLayer({
+          id: `origin-point-${markerId}`,
+          type: 'circle',
+          source: pointSourceId,
+          paint: {
+            'circle-radius': 12,
+            'circle-color': '#00ff00',
+            'circle-stroke-width': 3,
+            'circle-stroke-color': '#ffffff',
+            'circle-opacity': 1
+          }
+        });
+
+        logger.debug('Added origin:', markerId, 'at', originLng, originLat);
+      });
+    }
+
+    // STEP 4: Add ALL jammer zones (ORANGE CIRCLES)
+    if (jammers && jammers.length > 0) {
+      jammers.forEach((jammer, index) => {
+        const markerId = jammer.id || `jammer-${index}`;
+        const [jammerLng, jammerLat] = convertPointToLngLat(jammer);
+        const radiusInMeters = jammer.radius || 200;
+
+        logger.debug('=== RENDERING JAMMER ===');
+        logger.debug('Jammer ID:', markerId);
+        logger.debug('Position:', jammerLng, jammerLat);
+        logger.debug('Radius (meters):', radiusInMeters);
+        logger.debug('Jammer object:', jammer);
+
+        const sourceId = `jammer-${markerId}`;
+        const layerId = `jammer-circle-${markerId}`;
+        const outlineLayerId = `jammer-outline-${markerId}`;
+
+        // Create polygon circle with correct radius
+        const circleCoords = createCirclePolygon(jammerLng, jammerLat, radiusInMeters);
+
+        map.current.addSource(sourceId, {
+          type: 'geojson',
+          data: {
+            type: 'Feature',
+            geometry: {
+              type: 'Polygon',
+              coordinates: [circleCoords]
             }
           }
         });
 
         map.current.addLayer({
           id: layerId,
-          type: 'circle',
+          type: 'fill',
           source: sourceId,
           paint: {
-            'circle-radius': 12,
-            'circle-color': '#ff0000',
-            'circle-opacity': 1,
-            'circle-stroke-width': 3,
-            'circle-stroke-color': '#ffffff'
+            'fill-color': '#ff8c00',
+            'fill-opacity': 0.3
           }
         });
-      } else {
-        map.current.getSource(sourceId).setData({
-          type: 'Feature',
-          geometry: {
-            type: 'Point',
-            coordinates: [targetLng, targetLat, 0]
+
+        map.current.addLayer({
+          id: outlineLayerId,
+          type: 'line',
+          source: sourceId,
+          paint: {
+            'line-color': '#ff8c00',
+            'line-width': 2,
+            'line-opacity': 0.8
           }
         });
-      }
-    });
-  }, [targets, lng, lat]);
+
+        // Add center point marker for jammer
+        const centerSourceId = `jammer-center-${markerId}`;
+        map.current.addSource(centerSourceId, {
+          type: 'geojson',
+          data: {
+            type: 'Feature',
+            geometry: {
+              type: 'Point',
+              coordinates: [jammerLng, jammerLat]
+            }
+          }
+        });
+
+        map.current.addLayer({
+          id: `jammer-center-${markerId}`,
+          type: 'circle',
+          source: centerSourceId,
+          paint: {
+            'circle-radius': 8,
+            'circle-color': '#ff8c00',
+            'circle-stroke-width': 2,
+            'circle-stroke-color': '#ffffff',
+            'circle-opacity': 1
+          }
+        });
+
+        logger.debug('Added jammer:', markerId, 'at', jammerLng, jammerLat, 'radius:', radiusInMeters);
+      });
+    }
+
+    logger.debug('=== MARKER RENDERING COMPLETE ===');
+  }, [targets, origins, jammers, lng, lat]);
 
   // Click target pulsating marker
   useEffect(() => {

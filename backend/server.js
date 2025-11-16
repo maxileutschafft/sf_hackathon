@@ -421,9 +421,35 @@ app.post('/api/swarm-formation', (req, res) => {
 
 // Reset positions endpoint - resets drones to their hexagonal formation around first waypoint
 app.post('/api/reset-positions', (req, res) => {
-  const { uavId, swarmId } = req.body;
+  const { uavId, swarmId, centerX, centerY, radius } = req.body;
 
   let resetCount = 0;
+
+  // If custom center and radius provided (for mission initialization)
+  if (centerX !== undefined && centerY !== undefined && radius !== undefined) {
+    const centerZ = 0; // Ground level
+    const formationPositions = getHexagonalFormation(centerX, centerY, centerZ, radius);
+
+    Object.entries(uavStates).forEach(([id, uav], index) => {
+      const targetPosition = formationPositions[index % formationPositions.length];
+      const simulatorWs = simulatorConnections.get(id);
+
+      if (simulatorWs && simulatorWs.readyState === WebSocket.OPEN) {
+        simulatorWs.send(JSON.stringify({
+          type: 'command',
+          command: 'teleport',
+          params: targetPosition
+        }));
+        resetCount++;
+      }
+    });
+
+    return res.json({
+      success: true,
+      message: `Teleported ${resetCount} drone(s) to mission origin`,
+      resetCount
+    });
+  }
 
   // Reset specific UAV to its formation position
   if (uavId && uavStates[uavId]) {
@@ -465,29 +491,38 @@ app.post('/api/reset-positions', (req, res) => {
       }
     });
   }
-  // Reset all drones to their respective swarm formations
+  // Reset all drones to their respective formation positions
   else {
-    // Reset SWARM-1 to origin (0,0,0)
-    Object.entries(uavStates).forEach(([id, uav]) => {
-      if (uav.swarm === 'SWARM-1') {
-        const targetPosition = { x: 0, y: 0, z: 0 };
-        const simulatorWs = simulatorConnections.get(id);
+    // If no custom position provided, use SWARM-1's default waypoint
+    const swarm1Center = swarmWaypoints['SWARM-1'][0];
+    const swarm1Positions = getHexagonalFormation(swarm1Center.x, swarm1Center.y, swarm1Center.z);
 
-        if (simulatorWs && simulatorWs.readyState === WebSocket.OPEN) {
-          simulatorWs.send(JSON.stringify({
-            type: 'command',
-            command: 'goto',
-            params: targetPosition
-          }));
-          resetCount++;
-        }
+    Object.entries(uavStates).forEach(([id, uav]) => {
+      const targetPosition = swarm1Positions[uav.formationIndex % swarm1Positions.length];
+      const simulatorWs = simulatorConnections.get(id);
+
+      if (simulatorWs && simulatorWs.readyState === WebSocket.OPEN) {
+        // Disarm the drone first
+        simulatorWs.send(JSON.stringify({
+          type: 'command',
+          command: 'disarm',
+          params: {}
+        }));
+        
+        // Then send to initial position
+        simulatorWs.send(JSON.stringify({
+          type: 'command',
+          command: 'goto',
+          params: targetPosition
+        }));
+        resetCount++;
       }
     });
   }
 
   res.json({
     success: true,
-    message: `Reset ${resetCount} drone(s) to initial positions`,
+    message: `Reset ${resetCount} drone(s) to initial positions (disarmed)`,
     resetCount
   });
 });

@@ -265,6 +265,15 @@ def plan_astar_path(origin, target, jammers):
     
     logger.info(f"Found path with {len(path)} waypoints")
     
+    # Decimate path to every 10th waypoint (keep first and last)
+    if len(path) > 2:
+        decimated_path = [path[0]]  # Always keep first waypoint
+        for i in range(10, len(path) - 1, 10):  # Every 10th waypoint
+            decimated_path.append(path[i])
+        decimated_path.append(path[-1])  # Always keep last waypoint
+        logger.info(f"Decimated path from {len(path)} to {len(decimated_path)} waypoints (every 10th)")
+        path = decimated_path
+    
     # Convert path to waypoints with lat/lng
     waypoints = []
     for x, y in path:

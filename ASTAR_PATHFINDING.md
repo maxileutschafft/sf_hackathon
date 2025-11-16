@@ -251,4 +251,4 @@ Currently using 1-meter grid cells. To change resolution, modify the grid coordi
 
 ## Credits
 
-Based on the A* pathfinding algorithm originally developed for the mission planning system. Integrated into the UAV STING framework for intelligent drone navigation.
+Based on the A* pathfinding algorithm originally developed for the mission planning system. Integrated into the UAV HIVE framework for intelligent drone navigation.

@@ -442,20 +442,6 @@ function MissionPlanning({ onNavigateHome }) {
         <button className="home-nav-btn" onClick={onNavigateHome}>
           ← HOME
         </button>
-        <h1>
-          <div className="hive-title">
-            <span className="hive-letter">S</span>
-            <span className="hive-word">warm</span>
-            <span className="hive-letter">T</span>
-            <span className="hive-word">actical</span>
-            <span className="hive-letter">I</span>
-            <span className="hive-word">ntelligence &</span>
-            <span className="hive-letter">N</span>
-            <span className="hive-word">avigation</span>
-            <span className="hive-letter">G</span>
-            <span className="hive-word">rid</span>
-          </div>
-        </h1>
       </div>
 
       <div className="planning-sidebar">

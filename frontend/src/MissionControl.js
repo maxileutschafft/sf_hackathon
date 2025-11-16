@@ -1038,11 +1038,10 @@ function MissionControl({ onNavigateHome, missionData }) {
         <div className="modal-overlay" onClick={() => setShowSuccessModal(false)}>
           <div className="modal-content" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
-              <h2>🎉 Mission Success!</h2>
+              <h2>Target Hit</h2>
             </div>
             <div className="modal-body">
-              <p>The mission has been completed successfully.</p>
-              <p>All drones have landed safely at the final waypoint.</p>
+              <p>Target Hit</p>
             </div>
             <div className="modal-footer">
               <button 
