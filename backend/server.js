@@ -54,7 +54,8 @@ const targetMarkers = {};
 const missionParamsFile = path.join(__dirname, 'mission_params.json');
 let missionParams = {
   targets: [],
-  origins: []
+  origins: [],
+  jammers: []
 };
 
 // Load mission parameters from file on startup
@@ -62,18 +63,18 @@ try {
   if (fs.existsSync(missionParamsFile)) {
     const data = fs.readFileSync(missionParamsFile, 'utf8');
     missionParams = JSON.parse(data);
-    console.log(`Loaded mission params: ${missionParams.targets.length} targets, ${missionParams.origins.length} origins`);
+    console.log(`Loaded mission params: ${missionParams.targets?.length || 0} targets, ${missionParams.origins?.length || 0} origins, ${missionParams.jammers?.length || 0} jammers`);
   }
 } catch (error) {
   console.error('Error loading mission params:', error);
-  missionParams = { targets: [], origins: [] };
+  missionParams = { targets: [], origins: [], jammers: [] };
 }
 
 // Function to save mission parameters to file
 function saveMissionParams() {
   try {
     fs.writeFileSync(missionParamsFile, JSON.stringify(missionParams, null, 2));
-    console.log(`Saved mission params: ${missionParams.targets.length} targets, ${missionParams.origins.length} origins`);
+    console.log(`Saved mission params: ${missionParams.targets?.length || 0} targets, ${missionParams.origins?.length || 0} origins, ${missionParams.jammers?.length || 0} jammers`);
   } catch (error) {
     console.error('Error saving mission params:', error);
   }
@@ -403,9 +404,10 @@ app.get('/api/mission-params', (req, res) => {
 });
 
 app.post('/api/mission-params', (req, res) => {
-  const { targets, origins } = req.body;
+  const { targets, origins, jammers } = req.body;
   missionParams.targets = targets || [];
   missionParams.origins = origins || [];
+  missionParams.jammers = jammers || [];
   saveMissionParams();
   res.json({ success: true, ...missionParams });
 });

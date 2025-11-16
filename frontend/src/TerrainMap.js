@@ -8,7 +8,7 @@ mapboxgl.accessToken = process.env.REACT_APP_MAPBOX_TOKEN || 'pk.eyJ1IjoibWFwYm9
 const METERS_TO_LNG = 0.0001;
 const METERS_TO_LAT = 0.0001;
 
-function TerrainMap({ uavs, selectedUavId, selectedSwarm, onSelectUav, onMapClick, rois, targets, origins = [], onToggleStyleReady, onToggle2DViewReady, assemblyMode, isSelectingTarget, isSelectingOrigin }) {
+function TerrainMap({ uavs, selectedUavId, selectedSwarm, onSelectUav, onMapClick, rois, targets, origins = [], jammers = [], onToggleStyleReady, onToggle2DViewReady, assemblyMode, isSelectingTarget, isSelectingOrigin, isSelectingJammer, onJammerCreated }) {
   const mapContainer = useRef(null);
   const map = useRef(null);
   // Base position: lat 37.5139, lng -122.4961
@@ -21,6 +21,8 @@ function TerrainMap({ uavs, selectedUavId, selectedSwarm, onSelectUav, onMapClic
   const [styleVersion, setStyleVersion] = useState(0);
   const [cursorCoords, setCursorCoords] = useState(null);
   const [cursorPixelPos, setCursorPixelPos] = useState(null);
+  
+  // Jammer creation - no longer needed for click-based approach
 
   const convertPointToLngLat = (point) => {
     if (point && typeof point.lng === 'number' && typeof point.lat === 'number') {
@@ -33,6 +35,22 @@ function TerrainMap({ uavs, selectedUavId, selectedSwarm, onSelectUav, onMapClic
       ];
     }
     return [lng, lat];
+  };
+
+  // Helper function to create a circle polygon from center point and radius in meters
+  const createCirclePolygon = (centerLng, centerLat, radiusInMeters, points = 64) => {
+    const coords = [];
+    const distanceX = radiusInMeters * METERS_TO_LNG;
+    const distanceY = radiusInMeters * METERS_TO_LAT;
+
+    for (let i = 0; i <= points; i++) {
+      const theta = (i / points) * (2 * Math.PI);
+      const x = distanceX * Math.cos(theta);
+      const y = distanceY * Math.sin(theta);
+      coords.push([centerLng + x, centerLat + y]);
+    }
+
+    return coords;
   };
 
   // Initialize map
@@ -570,6 +588,100 @@ function TerrainMap({ uavs, selectedUavId, selectedSwarm, onSelectUav, onMapClic
     }
   }, [origins, lng, lat, styleVersion]);
 
+  // Jammer zones visualization (transparent orange circles)
+  useEffect(() => {
+    if (!map.current || !map.current.isStyleLoaded()) return;
+
+    const activeJammerIds = new Set();
+
+    jammers.forEach((jammer, index) => {
+      const markerId = jammer.id || `jammer-${index}`;
+      activeJammerIds.add(markerId);
+
+      const [jammerLng, jammerLat] = convertPointToLngLat(jammer);
+      const radiusInMeters = jammer.radius || 50;
+
+      const sourceId = `jammer-${markerId}`;
+      const layerId = `jammer-circle-${markerId}`;
+
+      // Create a polygon circle with the correct radius in meters
+      const circleCoords = createCirclePolygon(jammerLng, jammerLat, radiusInMeters);
+
+      if (!map.current.getSource(sourceId)) {
+        map.current.addSource(sourceId, {
+          type: 'geojson',
+          data: {
+            type: 'Feature',
+            geometry: {
+              type: 'Polygon',
+              coordinates: [circleCoords]
+            }
+          }
+        });
+
+        map.current.addLayer({
+          id: layerId,
+          type: 'fill',
+          source: sourceId,
+          paint: {
+            'fill-color': '#ff8c00',
+            'fill-opacity': 0.3
+          }
+        });
+
+        // Add circle outline
+        const outlineLayerId = `jammer-outline-${markerId}`;
+        map.current.addLayer({
+          id: outlineLayerId,
+          type: 'line',
+          source: sourceId,
+          paint: {
+            'line-color': '#ff8c00',
+            'line-width': 2,
+            'line-opacity': 0.8
+          }
+        });
+      } else {
+        // Update existing circle with new radius
+        map.current.getSource(sourceId).setData({
+          type: 'Feature',
+          geometry: {
+            type: 'Polygon',
+            coordinates: [circleCoords]
+          }
+        });
+      }
+    });
+
+    // Clean up removed jammer zones
+    const style = map.current.getStyle();
+    if (style?.layers) {
+      style.layers.forEach(layer => {
+        if (layer.id.startsWith('jammer-circle-') || layer.id.startsWith('jammer-outline-')) {
+          const markerId = layer.id.replace('jammer-circle-', '').replace('jammer-outline-', '');
+          if (!activeJammerIds.has(markerId)) {
+            if (map.current.getLayer(layer.id)) {
+              map.current.removeLayer(layer.id);
+            }
+          }
+        }
+      });
+      
+      // Clean up sources
+      const sources = map.current.getStyle().sources;
+      Object.keys(sources).forEach(sourceId => {
+        if (sourceId.startsWith('jammer-')) {
+          const markerId = sourceId.replace('jammer-', '');
+          if (!activeJammerIds.has(markerId)) {
+            if (map.current.getSource(sourceId)) {
+              map.current.removeSource(sourceId);
+            }
+          }
+        }
+      });
+    }
+  }, [jammers, lng, lat, styleVersion]);
+
 
   // Formation lines and swarm label
   useEffect(() => {
@@ -787,23 +899,44 @@ function TerrainMap({ uavs, selectedUavId, selectedSwarm, onSelectUav, onMapClic
     }
   }, [onToggle2DViewReady, is2DView]);
 
-  // If parent requests target selection mode, add a click listener directly on the map container
+  // If parent requests target/origin/jammer selection mode
   useEffect(() => {
     if (!map.current || !mapContainer.current) return;
     const container = mapContainer.current;
 
     const overlayClickHandler = (ev) => {
-      if (!isSelectingTarget && !isSelectingOrigin) return;
+      if (!isSelectingTarget && !isSelectingOrigin && !isSelectingJammer) return;
+      
       const rect = container.getBoundingClientRect();
       const x = ev.clientX - rect.left;
       const y = ev.clientY - rect.top;
       if (!map.current) return;
       const lngLat = map.current.unproject([x, y]);
-      console.log('Overlay click detected:', lngLat);
-      if (onMapClick) onMapClick(lngLat.lng, lngLat.lat);
+      
+      // Handle jammer click (50m fixed radius)
+      if (isSelectingJammer && onJammerCreated) {
+        const baseCoords = { lng: -122.4961, lat: 37.5139 };
+        const x_coord = (lngLat.lat - baseCoords.lat) / METERS_TO_LAT;
+        const y_coord = (lngLat.lng - baseCoords.lng) / METERS_TO_LNG;
+        
+        onJammerCreated({
+          lng: lngLat.lng,
+          lat: lngLat.lat,
+          x: x_coord,
+          y: y_coord,
+          radius: 50  // Fixed 50m radius
+        });
+        return;
+      }
+      
+      // Handle target/origin clicks
+      if ((isSelectingTarget || isSelectingOrigin) && onMapClick) {
+        console.log('Overlay click detected:', lngLat);
+        onMapClick(lngLat.lng, lngLat.lat);
+      }
     };
 
-    if (isSelectingTarget || isSelectingOrigin) {
+    if (isSelectingTarget || isSelectingOrigin || isSelectingJammer) {
       container.style.cursor = 'crosshair';
       container.addEventListener('click', overlayClickHandler);
     } else {
@@ -814,7 +947,7 @@ function TerrainMap({ uavs, selectedUavId, selectedSwarm, onSelectUav, onMapClic
       container.removeEventListener('click', overlayClickHandler);
       if (container) container.style.cursor = '';
     };
-  }, [isSelectingTarget, isSelectingOrigin, onMapClick]);
+  }, [isSelectingTarget, isSelectingOrigin, isSelectingJammer, onMapClick, onJammerCreated]);
 
   const selectedUav = uavs[selectedUavId];
 

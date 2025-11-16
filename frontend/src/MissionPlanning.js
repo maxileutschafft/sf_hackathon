@@ -7,10 +7,13 @@ function MissionPlanning({ onNavigateHome }) {
   const [onToggle2DView, setOnToggle2DView] = useState(null);
   const [isSelectingTarget, setIsSelectingTarget] = useState(false);
   const [isSelectingOrigin, setIsSelectingOrigin] = useState(false);
+  const [isSelectingJammer, setIsSelectingJammer] = useState(false);
   const [targets, setTargets] = useState([]);
   const [origins, setOrigins] = useState([]);
+  const [jammers, setJammers] = useState([]);
   const [targetCounter, setTargetCounter] = useState(1);
   const [originCounter, setOriginCounter] = useState(1);
+  const [jammerCounter, setJammerCounter] = useState(1);
 
   // Empty UAVs object for map initialization
   const emptyUavs = {};
@@ -26,6 +29,7 @@ function MissionPlanning({ onNavigateHome }) {
       if (event.key === 'Escape') {
         setIsSelectingTarget(false);
         setIsSelectingOrigin(false);
+        setIsSelectingJammer(false);
       }
     };
 
@@ -56,20 +60,29 @@ function MissionPlanning({ onNavigateHome }) {
           const maxId = Math.max(...originList.map(o => parseInt(o.id.replace('ORIGIN-', '')) || 0));
           setOriginCounter(maxId + 1);
         }
+        
+        // Load jammers
+        const jammerList = data.jammers || [];
+        setJammers(jammerList);
+        if (jammerList.length > 0) {
+          const maxId = Math.max(...jammerList.map(j => parseInt(j.id.replace('JAMMER-', '')) || 0));
+          setJammerCounter(maxId + 1);
+        }
       }
     } catch (error) {
       console.error('Error loading mission params:', error);
     }
   };
 
-  const saveMissionParams = async (newTargets, newOrigins) => {
+  const saveMissionParams = async (newTargets, newOrigins, newJammers) => {
     try {
       const response = await fetch('http://localhost:3001/api/mission-params', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
           targets: newTargets,
-          origins: newOrigins 
+          origins: newOrigins,
+          jammers: newJammers || jammers
         })
       });
       if (response.ok) {
@@ -83,11 +96,19 @@ function MissionPlanning({ onNavigateHome }) {
   const handleSelectTargetClick = () => {
     setIsSelectingTarget(!isSelectingTarget);
     setIsSelectingOrigin(false);
+    setIsSelectingJammer(false);
   };
 
   const handleSelectOriginClick = () => {
     setIsSelectingOrigin(!isSelectingOrigin);
     setIsSelectingTarget(false);
+    setIsSelectingJammer(false);
+  };
+
+  const handleSelectJammerClick = () => {
+    setIsSelectingJammer(!isSelectingJammer);
+    setIsSelectingTarget(false);
+    setIsSelectingOrigin(false);
   };
 
   const handleMapClick = (lng, lat) => {
@@ -115,7 +136,7 @@ function MissionPlanning({ onNavigateHome }) {
       const updatedTargets = [...targets, newTarget];
       setTargets(updatedTargets);
       setTargetCounter(targetCounter + 1);
-      saveMissionParams(updatedTargets, origins);
+      saveMissionParams(updatedTargets, origins, jammers);
       // Keep selection mode active - removed setIsSelectingTarget(false);
     }
     
@@ -141,7 +162,7 @@ function MissionPlanning({ onNavigateHome }) {
       const updatedOrigins = [...origins, newOrigin];
       setOrigins(updatedOrigins);
       setOriginCounter(originCounter + 1);
-      saveMissionParams(targets, updatedOrigins);
+      saveMissionParams(targets, updatedOrigins, jammers);
       // Keep selection mode active - removed setIsSelectingOrigin(false);
     }
   };
@@ -149,7 +170,7 @@ function MissionPlanning({ onNavigateHome }) {
   const handleDeleteTarget = (targetId) => {
     const updatedTargets = targets.filter(t => t.id !== targetId);
     setTargets(updatedTargets);
-    saveMissionParams(updatedTargets, origins);
+    saveMissionParams(updatedTargets, origins, jammers);
   };
 
   const handleRenameTarget = (targetId, newName) => {
@@ -157,13 +178,13 @@ function MissionPlanning({ onNavigateHome }) {
       t.id === targetId ? { ...t, name: newName } : t
     );
     setTargets(updatedTargets);
-    saveMissionParams(updatedTargets, origins);
+    saveMissionParams(updatedTargets, origins, jammers);
   };
 
   const handleDeleteOrigin = (originId) => {
     const updatedOrigins = origins.filter(o => o.id !== originId);
     setOrigins(updatedOrigins);
-    saveMissionParams(targets, updatedOrigins);
+    saveMissionParams(targets, updatedOrigins, jammers);
   };
 
   const handleRenameOrigin = (originId, newName) => {
@@ -171,7 +192,46 @@ function MissionPlanning({ onNavigateHome }) {
       o.id === originId ? { ...o, name: newName } : o
     );
     setOrigins(updatedOrigins);
-    saveMissionParams(targets, updatedOrigins);
+    saveMissionParams(targets, updatedOrigins, jammers);
+  };
+
+  const handleJammerCreated = (jammerData) => {
+    const newJammer = {
+      id: `JAMMER-${jammerCounter}`,
+      name: `Jammer ${jammerCounter}`,
+      ...jammerData,
+      createdAt: new Date().toISOString()
+    };
+
+    const updatedJammers = [...jammers, newJammer];
+    setJammers(updatedJammers);
+    setJammerCounter(jammerCounter + 1);
+    saveMissionParams(targets, origins, updatedJammers);
+  };
+
+  const handleDeleteJammer = (jammerId) => {
+    const updatedJammers = jammers.filter(j => j.id !== jammerId);
+    setJammers(updatedJammers);
+    saveMissionParams(targets, origins, updatedJammers);
+  };
+
+  const handleRenameJammer = (jammerId, newName) => {
+    const updatedJammers = jammers.map(j => 
+      j.id === jammerId ? { ...j, name: newName } : j
+    );
+    setJammers(updatedJammers);
+    saveMissionParams(targets, origins, updatedJammers);
+  };
+
+  const handleUpdateJammerRadius = (jammerId, newRadius) => {
+    const radius = parseFloat(newRadius);
+    if (isNaN(radius) || radius < 10) return; // Minimum 10m radius
+    
+    const updatedJammers = jammers.map(j => 
+      j.id === jammerId ? { ...j, radius: radius } : j
+    );
+    setJammers(updatedJammers);
+    saveMissionParams(targets, origins, updatedJammers);
   };
 
   return (
@@ -184,6 +244,8 @@ function MissionPlanning({ onNavigateHome }) {
         onMapClick={handleMapClick}
         isSelectingTarget={isSelectingTarget}
         isSelectingOrigin={isSelectingOrigin}
+        isSelectingJammer={isSelectingJammer}
+        onJammerCreated={handleJammerCreated}
         rois={[]}
         targets={targets.map(t => ({
           id: t.id,
@@ -200,6 +262,14 @@ function MissionPlanning({ onNavigateHome }) {
           lat: o.lat,
           lng: o.lng,
           z: 0
+        }))}
+        jammers={jammers.map(j => ({
+          id: j.id,
+          x: j.x,
+          y: j.y,
+          lat: j.lat,
+          lng: j.lng,
+          radius: j.radius
         }))}
         onToggleStyleReady={setOnToggleStyle}
         onToggle2DViewReady={setOnToggle2DView}
@@ -240,6 +310,12 @@ function MissionPlanning({ onNavigateHome }) {
           >
             {isSelectingOrigin ? '✓ SELECT ORIGIN' : 'SELECT ORIGIN'}
           </button>
+          <button
+            className={`topology-toggle-btn ${isSelectingJammer ? 'active-selection' : ''}`}
+            onClick={handleSelectJammerClick}
+          >
+            {isSelectingJammer ? '✓ SELECT JAMMER' : 'SELECT JAMMER'}
+          </button>
         </div>
 
         <div className="planning-section">
@@ -249,7 +325,9 @@ function MissionPlanning({ onNavigateHome }) {
               ? 'Click on the map to place a target marker' 
               : isSelectingOrigin
               ? 'Click on the map to place a drone origin point'
-              : 'Use the buttons above to add targets and drone origins'}
+              : isSelectingJammer
+              ? 'Click on the map to create a 50m jammer zone'
+              : 'Use the buttons above to add targets, origins, and jammers'}
           </div>
         </div>
       </div>
@@ -337,6 +415,65 @@ function MissionPlanning({ onNavigateHome }) {
                     <div className="target-coord">
                       <span className="coord-label">Lng:</span>
                       <span className="coord-value">{origin.lng.toFixed(6)}°</span>
+                    </div>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Right side panel for jammer list - only show when selecting jammers */}
+      {isSelectingJammer && (
+        <div className="targets-panel">
+          <div className="panel-header">
+            <h2>JAMMER LIST</h2>
+            <div className="target-count">{jammers.length} Jammer{jammers.length !== 1 ? 's' : ''}</div>
+          </div>
+          <div className="panel-content">
+            {jammers.length === 0 ? (
+              <div className="empty-message">
+                No jammers added yet. Click on the map to create a jammer zone.
+              </div>
+            ) : (
+              jammers.map((jammer) => (
+                <div key={jammer.id} className="target-item">
+                  <div className="target-header">
+                    <input
+                      type="text"
+                      className="target-name-input"
+                      value={jammer.name}
+                      onChange={(e) => handleRenameJammer(jammer.id, e.target.value)}
+                    />
+                    <button 
+                      className="delete-target-btn"
+                      onClick={() => handleDeleteJammer(jammer.id)}
+                    >
+                      ✕
+                    </button>
+                  </div>
+                  <div className="target-details">
+                    <div className="target-coord">
+                      <span className="coord-label">Lat:</span>
+                      <span className="coord-value">{jammer.lat.toFixed(6)}°</span>
+                    </div>
+                    <div className="target-coord">
+                      <span className="coord-label">Lng:</span>
+                      <span className="coord-value">{jammer.lng.toFixed(6)}°</span>
+                    </div>
+                    <div className="target-coord">
+                      <span className="coord-label">Radius:</span>
+                      <input
+                        type="number"
+                        className="radius-input"
+                        value={jammer.radius}
+                        min="10"
+                        step="5"
+                        onChange={(e) => handleUpdateJammerRadius(jammer.id, e.target.value)}
+                        style={{ width: '60px', marginLeft: '5px' }}
+                      />
+                      <span style={{ marginLeft: '3px' }}>m</span>
                     </div>
                   </div>
                 </div>
