@@ -14,9 +14,15 @@ function MissionPlanning({ onNavigateHome }) {
   const [targets, setTargets] = useState([]);
   const [origins, setOrigins] = useState([]);
   const [jammers, setJammers] = useState([]);
+  const [trajectories, setTrajectories] = useState([]);
   const [targetCounter, setTargetCounter] = useState(1);
   const [originCounter, setOriginCounter] = useState(1);
   const [jammerCounter, setJammerCounter] = useState(1);
+  const [isPlanning, setIsPlanning] = useState(false);
+  const [waypointPayload, setWaypointPayload] = useState(null);
+  const [isFetchingWaypoints, setIsFetchingWaypoints] = useState(false);
+  const [waypointError, setWaypointError] = useState(null);
+  const [showTrajectoryPanel, setShowTrajectoryPanel] = useState(false);
 
   // Empty UAVs object for map initialization
   const emptyUavs = {};
@@ -24,6 +30,7 @@ function MissionPlanning({ onNavigateHome }) {
   // Load targets from backend on mount
   useEffect(() => {
     loadMissionParams();
+    fetchLatestWaypoints();
   }, []);
 
   // ESC key handler to exit selection modes
@@ -74,6 +81,35 @@ function MissionPlanning({ onNavigateHome }) {
       }
     } catch (error) {
       logger.error('Error loading mission params:', error);
+    }
+  };
+
+  const fetchLatestWaypoints = async () => {
+    try {
+      setWaypointError(null);
+      setIsFetchingWaypoints(true);
+      const response = await fetch('http://localhost:3001/api/waypoints');
+
+      if (response.status === 404) {
+        setWaypointPayload(null);
+        setTrajectories([]);
+        return null;
+      }
+
+      if (!response.ok) {
+        throw new Error(`Failed to load waypoints: HTTP ${response.status}`);
+      }
+
+      const data = await response.json();
+      setWaypointPayload(data);
+      setTrajectories(data.trajectories || []);
+      return data;
+    } catch (error) {
+      console.error('Error fetching persisted waypoints:', error);
+      setWaypointError(error.message);
+      return null;
+    } finally {
+      setIsFetchingWaypoints(false);
     }
   };
 
@@ -227,6 +263,72 @@ function MissionPlanning({ onNavigateHome }) {
     saveMissionParams(targets, origins, updatedJammers);
   };
 
+  const handlePlanMission = async () => {
+    if (origins.length === 0 || targets.length === 0) {
+      alert('Please add at least one origin and one target before planning.');
+      return;
+    }
+
+    setIsPlanning(true);
+    console.log('=== STARTING MISSION PLANNING ===');
+    console.log('Origins:', origins);
+    console.log('Targets:', targets);
+    console.log('Jammers:', jammers);
+    
+    try {
+      const requestData = { 
+        origins: origins,
+        targets: targets,
+        jammers: jammers
+      };
+      console.log('Sending request to backend:', requestData);
+      
+      const response = await fetch('http://localhost:3001/api/plan-mission', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(requestData)
+      });
+
+      console.log('Response status:', response.status);
+      
+      if (response.ok) {
+        const result = await response.json();
+        console.log('=== RECEIVED TRAJECTORIES ===');
+        console.log('Full result:', JSON.stringify(result, null, 2));
+        console.log('Number of trajectories:', result.trajectories?.length || 0);
+        console.log('Setting trajectories state to:', result.trajectories);
+        setTrajectories(result.trajectories ? [...result.trajectories] : []);
+        setWaypointPayload(result);
+        await fetchLatestWaypoints();
+        console.log('Trajectories state set!');
+      } else {
+        const error = await response.json();
+        console.error('Planning failed:', error);
+        alert(`Mission planning failed: ${error.message || 'Unknown error'}`);
+      }
+    } catch (error) {
+      console.error('Error planning mission:', error);
+      alert(`Failed to plan mission: ${error.message}`);
+    } finally {
+      setIsPlanning(false);
+      console.log('=== PLANNING COMPLETE ===');
+    }
+  };
+
+  const displayedTrajectories = waypointPayload?.trajectories || trajectories;
+  const hasWaypoints = displayedTrajectories.length > 0;
+
+  const handleClearWaypoints = () => {
+    setWaypointPayload(null);
+    setTrajectories([]);
+    setShowTrajectoryPanel(false);
+  };
+
+  const handleShowTrajectory = async () => {
+    await fetchLatestWaypoints();
+    setShowTrajectoryPanel(true);
+  };
+
   return (
     <div className="mission-planning">
       <TerrainMap
@@ -240,6 +342,7 @@ function MissionPlanning({ onNavigateHome }) {
         isSelectingOrigin={isSelectingOrigin}
         isSelectingJammer={isSelectingJammer}
         onJammerCreated={handleJammerCreated}
+        trajectories={trajectories}
         rois={[]}
         targets={targets.map(t => ({
           id: t.id,
@@ -322,6 +425,20 @@ function MissionPlanning({ onNavigateHome }) {
           >
             {isSelectingJammer ? '✓ SELECT JAMMER' : 'SELECT JAMMER'}
           </button>
+          <button
+            className="topology-toggle-btn plan-mission-btn"
+            onClick={handlePlanMission}
+            disabled={isPlanning || origins.length === 0 || targets.length === 0}
+          >
+            {isPlanning ? 'PLANNING...' : 'PLAN MISSION'}
+          </button>
+          <button
+            className="topology-toggle-btn show-trajectory-btn"
+            onClick={handleShowTrajectory}
+            disabled={isFetchingWaypoints}
+          >
+            {isFetchingWaypoints ? 'LOADING...' : 'SHOW TRAJECTORY'}
+          </button>
         </div>
 
         <div className="planning-section">
@@ -333,13 +450,15 @@ function MissionPlanning({ onNavigateHome }) {
               ? 'Click on the map to place a drone origin point'
               : isSelectingJammer
               ? 'Click on the map to create a 50m jammer zone'
+              : displayedTrajectories.length > 0
+              ? `Mission planned: ${displayedTrajectories.length} trajectory path${displayedTrajectories.length !== 1 ? 's' : ''}`
               : 'Use the buttons above to add targets, origins, and jammers'}
           </div>
         </div>
       </div>
 
       {/* Right side panel for targets list - only show when selecting targets */}
-      {isSelectingTarget && (
+      {isSelectingTarget && !showTrajectoryPanel && (
         <div className="targets-panel">
           <div className="panel-header">
             <h2>TARGET LIST</h2>
@@ -385,7 +504,7 @@ function MissionPlanning({ onNavigateHome }) {
       )}
 
       {/* Right side panel for origins list - only show when selecting origins */}
-      {isSelectingOrigin && (
+      {isSelectingOrigin && !showTrajectoryPanel && (
         <div className="targets-panel">
           <div className="panel-header">
             <h2>ORIGIN LIST</h2>
@@ -431,7 +550,7 @@ function MissionPlanning({ onNavigateHome }) {
       )}
 
       {/* Right side panel for jammer list - only show when selecting jammers */}
-      {isSelectingJammer && (
+      {isSelectingJammer && !showTrajectoryPanel && (
         <div className="targets-panel">
           <div className="panel-header">
             <h2>JAMMER LIST</h2>
@@ -485,6 +604,74 @@ function MissionPlanning({ onNavigateHome }) {
                 </div>
               ))
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Right side panel for trajectory waypoints - show when SHOW TRAJECTORY button clicked */}
+      {showTrajectoryPanel && (
+        <div className="targets-panel waypoints-panel">
+          <div className="panel-header">
+            <div>
+              <h2>WAYPOINTS</h2>
+              <div className="panel-subtitle">Synced from waypoints.json</div>
+            </div>
+            <div className="panel-actions">
+              <div className="target-count">
+                {displayedTrajectories.length} Trajectory{displayedTrajectories.length !== 1 ? 'ies' : ''}
+              </div>
+              <button className="clear-waypoints-btn" onClick={handleClearWaypoints}>
+                CLOSE
+              </button>
+            </div>
+          </div>
+          <div className="panel-content waypoints-panel-content">
+            {isFetchingWaypoints && (
+              <div className="waypoints-status">Updating from backend…</div>
+            )}
+            {waypointError && (
+              <div className="waypoints-error">{waypointError}</div>
+            )}
+
+            {displayedTrajectories.length === 0 ? (
+              <div className="empty-message">
+                No trajectories found. Click "PLAN MISSION" first to generate waypoints.
+              </div>
+            ) : (
+              displayedTrajectories.map((traj, index) => (
+                <div key={`trajectory-${index}`} className="waypoint-trajectory">
+                  <div className="waypoint-trajectory-header">
+                    <div>
+                      <div className="trajectory-label">Trajectory {index + 1}</div>
+                      <div className="trajectory-meta">
+                        {traj.origin_id || 'Origin'} → {traj.target_id || 'Target'}
+                      </div>
+                    </div>
+                    <div className="trajectory-count">
+                      {traj.waypoints?.length || 0} waypoint{(traj.waypoints?.length || 0) !== 1 ? 's' : ''}
+                    </div>
+                  </div>
+
+                  <div className="waypoint-list">
+                    {(traj.waypoints || []).map((wp, waypointIndex) => (
+                      <div key={`wp-${index}-${waypointIndex}`} className="waypoint-row">
+                        <div className="waypoint-index">#{waypointIndex + 1}</div>
+                        <div className="waypoint-coordinates">
+                          <div><span>Lat</span><strong>{wp.lat?.toFixed ? wp.lat.toFixed(6) : wp.lat}</strong></div>
+                          <div><span>Lng</span><strong>{wp.lng?.toFixed ? wp.lng.toFixed(6) : wp.lng}</strong></div>
+                          <div><span>Alt</span><strong>{wp.alt ?? '—'} m</strong></div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))
+            )}
+
+            <details className="waypoints-json">
+              <summary>Raw JSON</summary>
+              <pre>{JSON.stringify(waypointPayload || { trajectories }, null, 2)}</pre>
+            </details>
           </div>
         </div>
       )}

@@ -35,6 +35,25 @@ services:
       - backend
     restart: unless-stopped
 
+  pathplanner:
+    build: ./pathplanner
+    container_name: uav-pathplanner
+    ports:
+      - "5001:5000"
+    networks:
+      - uav-network
+    environment:
+      - FLASK_ENV=production
+    depends_on:
+      - backend
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:5000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
   hornet-1:
     build: ./simulator
     container_name: hornet-simulator-1

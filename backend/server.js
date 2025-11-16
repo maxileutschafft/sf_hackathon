@@ -3,6 +3,8 @@ const http = require('http');
 const WebSocket = require('ws');
 const cors = require('cors');
 const bodyParser = require('body-parser');
+const path = require('path');
+const fs = require('fs');
 
 // Configuration constants
 const DEBUG = process.env.NODE_ENV !== 'production';
@@ -591,6 +593,82 @@ app.post('/api/swarm-waypoint', (req, res) => {
     formation: formationPositions,
     commandsSent: commandCount
   });
+});
+
+// Path planning endpoint - proxies to pathplanner service
+app.post('/api/plan-mission', async (req, res) => {
+  try {
+    const { origins, targets, jammers } = req.body;
+    
+    logger.info(`Planning mission with ${origins?.length || 0} origins, ${targets?.length || 0} targets, ${jammers?.length || 0} jammers`);
+    
+    // Forward request to pathplanner service
+    const fetch = require('node-fetch');
+    const response = await fetch('http://pathplanner:5000/plan', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        origins: origins || [],
+        targets: targets || [],
+        jammers: jammers || []
+      })
+    });
+    
+    if (!response.ok) {
+      throw new Error(`Pathplanner returned status ${response.status}`);
+    }
+    
+    const result = await response.json();
+    logger.info(`Received ${result.trajectories?.length || 0} trajectories from pathplanner`);
+    
+    // Save waypoints to file for debugging
+    const waypointsFile = path.join(__dirname, 'waypoints.json');
+    try {
+      fs.writeFileSync(waypointsFile, JSON.stringify(result, null, 2));
+      logger.debug(`Saved waypoints to ${waypointsFile}`);
+    } catch (error) {
+      logger.error('Error saving waypoints:', error);
+    }
+    
+    res.json(result);
+  } catch (error) {
+    logger.error('Error calling pathplanner:', error);
+    res.status(500).json({ 
+      error: 'Failed to plan mission',
+      message: error.message 
+    });
+  }
+});
+
+// Retrieve the most recently saved waypoints
+app.get('/api/waypoints', (req, res) => {
+  const waypointsFile = path.join(__dirname, 'waypoints.json');
+
+  try {
+    if (!fs.existsSync(waypointsFile)) {
+      return res.status(404).json({
+        error: 'Waypoints not found',
+        message: 'No mission has been planned yet.'
+      });
+    }
+
+    const data = fs.readFileSync(waypointsFile, 'utf-8');
+    const parsed = JSON.parse(data);
+    res.json(parsed);
+  } catch (error) {
+    logger.error('Error reading waypoints file:', error);
+    res.status(500).json({
+      error: 'Failed to read waypoints file',
+      message: error.message
+    });
+  }
+});
+
+// Legacy endpoint for backward compatibility
+app.get('/api/mission-targets', (req, res) => {
+  res.json({ targets: [] });
 });
 
 // Start server

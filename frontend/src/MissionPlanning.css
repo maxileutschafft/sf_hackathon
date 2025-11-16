@@ -87,6 +87,41 @@
   animation: pulse 1.5s ease-in-out infinite;
 }
 
+.planning-sidebar .topology-toggle-btn.plan-mission-btn {
+  background: rgba(0, 255, 255, 0.1);
+  border-color: rgba(0, 255, 255, 0.5);
+  color: #00ffff;
+  margin-top: 1rem;
+  font-weight: 700;
+}
+
+.planning-sidebar .topology-toggle-btn.plan-mission-btn:hover:not(:disabled) {
+  background: rgba(0, 255, 255, 0.2);
+  box-shadow: 0 0 20px rgba(0, 255, 255, 0.5);
+}
+
+.planning-sidebar .topology-toggle-btn.plan-mission-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.planning-sidebar .topology-toggle-btn.show-trajectory-btn {
+  background: rgba(0, 255, 255, 0.1);
+  border-color: rgba(0, 255, 255, 0.5);
+  color: #00ffff;
+  font-weight: 700;
+}
+
+.planning-sidebar .topology-toggle-btn.show-trajectory-btn:hover:not(:disabled) {
+  background: rgba(0, 255, 255, 0.2);
+  box-shadow: 0 0 20px rgba(0, 255, 255, 0.5);
+}
+
+.planning-sidebar .topology-toggle-btn.show-trajectory-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
 @keyframes pulse {
   0%, 100% {
     box-shadow: 0 0 20px rgba(138, 43, 226, 0.7);
@@ -326,4 +361,182 @@
 
 .targets-panel .panel-content::-webkit-scrollbar-thumb:hover {
   background: rgba(138, 43, 226, 0.7);
+}
+
+.waypoints-panel {
+  width: 420px;
+  border-left: 2px solid rgba(0, 255, 255, 0.4);
+  z-index: 95;
+}
+
+.waypoints-panel .panel-header {
+  background: rgba(0, 255, 255, 0.12);
+  border-bottom-color: rgba(0, 255, 255, 0.4);
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.panel-subtitle {
+  font-size: 0.75rem;
+  color: rgba(255, 255, 255, 0.6);
+  letter-spacing: 0.1rem;
+  margin-top: 0.3rem;
+}
+
+.panel-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.clear-waypoints-btn {
+  background: rgba(255, 0, 0, 0.15);
+  border: 1px solid rgba(255, 0, 0, 0.5);
+  color: #ff5c5c;
+  font-weight: 700;
+  letter-spacing: 0.1rem;
+  padding: 0.4rem 0.8rem;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 0.2s ease, box-shadow 0.2s ease;
+}
+
+.clear-waypoints-btn:hover {
+  background: rgba(255, 0, 0, 0.3);
+  box-shadow: 0 0 10px rgba(255, 0, 0, 0.4);
+}
+
+.waypoints-panel-content {
+  padding-bottom: 2rem;
+}
+
+.waypoints-status,
+.waypoints-error {
+  margin-bottom: 1rem;
+  padding: 0.8rem 1rem;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  letter-spacing: 0.05rem;
+}
+
+.waypoints-status {
+  background: rgba(0, 255, 255, 0.15);
+  color: #00ffff;
+  border: 1px solid rgba(0, 255, 255, 0.3);
+}
+
+.waypoints-error {
+  background: rgba(255, 0, 0, 0.15);
+  color: #ff5c5c;
+  border: 1px solid rgba(255, 0, 0, 0.3);
+}
+
+.waypoint-trajectory {
+  background: rgba(0, 10, 20, 0.5);
+  border: 1px solid rgba(0, 255, 255, 0.2);
+  border-radius: 8px;
+  padding: 1rem;
+  margin-bottom: 1rem;
+  box-shadow: 0 0 15px rgba(0, 255, 255, 0.1);
+}
+
+.waypoint-trajectory-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.8rem;
+}
+
+.trajectory-label {
+  font-size: 1rem;
+  color: #00ffff;
+  letter-spacing: 0.1rem;
+}
+
+.trajectory-meta {
+  font-size: 0.8rem;
+  color: rgba(255, 255, 255, 0.7);
+  text-transform: uppercase;
+  letter-spacing: 0.08rem;
+}
+
+.trajectory-count {
+  font-size: 0.85rem;
+  color: rgba(255, 255, 255, 0.9);
+  background: rgba(0, 255, 255, 0.2);
+  padding: 0.3rem 0.6rem;
+  border-radius: 999px;
+  border: 1px solid rgba(0, 255, 255, 0.3);
+}
+
+.waypoint-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.waypoint-row {
+  display: flex;
+  gap: 0.6rem;
+  align-items: center;
+  background: rgba(0, 0, 0, 0.35);
+  border-radius: 6px;
+  padding: 0.6rem;
+  border: 1px solid rgba(0, 255, 255, 0.15);
+}
+
+.waypoint-index {
+  font-weight: 900;
+  color: #00ffff;
+  font-size: 0.9rem;
+  width: 40px;
+  text-align: center;
+}
+
+.waypoint-coordinates {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.5rem;
+  width: 100%;
+}
+
+.waypoint-coordinates span {
+  display: block;
+  font-size: 0.7rem;
+  color: rgba(255, 255, 255, 0.5);
+  letter-spacing: 0.05rem;
+}
+
+.waypoint-coordinates strong {
+  display: block;
+  font-size: 0.85rem;
+  color: #ffffff;
+  font-family: 'Courier New', monospace;
+}
+
+.waypoints-json {
+  margin-top: 1.5rem;
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid rgba(0, 255, 255, 0.2);
+  border-radius: 8px;
+  padding: 0.8rem;
+}
+
+.waypoints-json summary {
+  cursor: pointer;
+  color: #00ffff;
+  font-weight: 700;
+  letter-spacing: 0.1rem;
+  margin-bottom: 0.5rem;
+}
+
+.waypoints-json pre {
+  max-height: 200px;
+  overflow: auto;
+  background: rgba(0, 0, 0, 0.5);
+  padding: 0.8rem;
+  border-radius: 6px;
+  color: #00ffff;
+  font-size: 0.75rem;
 }
