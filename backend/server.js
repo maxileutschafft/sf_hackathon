@@ -671,6 +671,58 @@ app.get('/api/mission-targets', (req, res) => {
   res.json({ targets: [] });
 });
 
+// Mission parameters endpoints (origins, targets, jammers)
+app.get('/api/mission-params', (req, res) => {
+  const paramsFile = path.join(__dirname, 'mission_params.json');
+  
+  try {
+    if (!fs.existsSync(paramsFile)) {
+      return res.json({
+        origins: [],
+        targets: [],
+        jammers: []
+      });
+    }
+    
+    const data = fs.readFileSync(paramsFile, 'utf-8');
+    const parsed = JSON.parse(data);
+    res.json(parsed);
+  } catch (error) {
+    logger.error('Error reading mission params file:', error);
+    res.status(500).json({
+      error: 'Failed to read mission params',
+      message: error.message
+    });
+  }
+});
+
+app.post('/api/mission-params', (req, res) => {
+  const paramsFile = path.join(__dirname, 'mission_params.json');
+  const { origins, targets, jammers } = req.body;
+  
+  try {
+    const data = {
+      origins: origins || [],
+      targets: targets || [],
+      jammers: jammers || []
+    };
+    
+    fs.writeFileSync(paramsFile, JSON.stringify(data, null, 2));
+    logger.info(`Saved mission params: ${origins?.length || 0} origins, ${targets?.length || 0} targets, ${jammers?.length || 0} jammers`);
+    
+    res.json({
+      success: true,
+      message: 'Mission parameters saved successfully'
+    });
+  } catch (error) {
+    logger.error('Error saving mission params:', error);
+    res.status(500).json({
+      error: 'Failed to save mission params',
+      message: error.message
+    });
+  }
+});
+
 // Start server
 const PORT = process.env.PORT || 3001;
 server.listen(PORT, () => {

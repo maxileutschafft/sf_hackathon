@@ -540,3 +540,90 @@
   color: #00ffff;
   font-size: 0.75rem;
 }
+
+/* A* Statistics Styling */
+.trajectory-stats {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+  background: rgba(0, 0, 0, 0.3);
+  padding: 0.8rem;
+  border-radius: 6px;
+  border: 1px solid rgba(0, 255, 255, 0.2);
+}
+
+.stat-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.stat-label {
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 0.8rem;
+  letter-spacing: 0.05rem;
+}
+
+.stat-value {
+  color: #00ffff;
+  font-weight: 700;
+  font-size: 0.9rem;
+  font-family: 'Courier New', monospace;
+}
+
+.stat-value.success {
+  color: #00ff00;
+}
+
+.stat-value.warning {
+  color: #ffaa00;
+}
+
+.waypoint-ellipsis {
+  justify-content: center;
+  color: rgba(255, 255, 255, 0.5);
+  font-style: italic;
+  border-style: dashed;
+}
+
+.radius-input {
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid rgba(138, 43, 226, 0.3);
+  border-radius: 4px;
+  padding: 0.3rem;
+  color: #8a2be2;
+  font-family: 'Orbitron', sans-serif;
+  font-size: 0.8rem;
+  font-weight: 700;
+  outline: none;
+  transition: all 0.3s ease;
+}
+
+.radius-input:focus {
+  border-color: #8a2be2;
+  box-shadow: 0 0 10px rgba(138, 43, 226, 0.3);
+}
+
+/* STING Title Styling */
+.hive-title {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.3rem;
+  font-family: 'Orbitron', sans-serif;
+}
+
+.hive-letter {
+  font-size: 2.2rem;
+  font-weight: 900;
+  color: #8a2be2;
+  text-shadow: 0 0 30px rgba(138, 43, 226, 0.8);
+}
+
+.hive-word {
+  font-size: 1.4rem;
+  font-weight: 600;
+  color: rgba(138, 43, 226, 0.7);
+  letter-spacing: 0.15rem;
+}
+

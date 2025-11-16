@@ -636,7 +636,7 @@ function MissionPlanning({ onNavigateHome }) {
           <div className="panel-header">
             <div>
               <h2>WAYPOINTS</h2>
-              <div className="panel-subtitle">Synced from waypoints.json</div>
+              <div className="panel-subtitle">A* Pathfinding Results</div>
             </div>
             <div className="panel-actions">
               <div className="target-count">
@@ -674,8 +674,28 @@ function MissionPlanning({ onNavigateHome }) {
                     </div>
                   </div>
 
+                  {/* Display A* statistics if available */}
+                  {traj.stats && (
+                    <div className="trajectory-stats">
+                      <div className="stat-item">
+                        <span className="stat-label">Path Length:</span>
+                        <span className="stat-value">{traj.stats.path_length}m</span>
+                      </div>
+                      <div className="stat-item">
+                        <span className="stat-label">Total Waypoints:</span>
+                        <span className="stat-value">{traj.stats.total_waypoints}</span>
+                      </div>
+                      <div className="stat-item">
+                        <span className="stat-label">In Jammer Zone:</span>
+                        <span className={`stat-value ${traj.stats.steps_in_jammer > 0 ? 'warning' : 'success'}`}>
+                          {traj.stats.steps_in_jammer} ({traj.stats.steps_in_jammer > 0 ? '⚠️' : '✓'})
+                        </span>
+                      </div>
+                    </div>
+                  )}
+
                   <div className="waypoint-list">
-                    {(traj.waypoints || []).map((wp, waypointIndex) => (
+                    {(traj.waypoints || []).slice(0, 10).map((wp, waypointIndex) => (
                       <div key={`wp-${index}-${waypointIndex}`} className="waypoint-row">
                         <div className="waypoint-index">#{waypointIndex + 1}</div>
                         <div className="waypoint-coordinates">
@@ -685,6 +705,11 @@ function MissionPlanning({ onNavigateHome }) {
                         </div>
                       </div>
                     ))}
+                    {(traj.waypoints?.length || 0) > 10 && (
+                      <div className="waypoint-row waypoint-ellipsis">
+                        ... and {(traj.waypoints?.length || 0) - 10} more waypoints
+                      </div>
+                    )}
                   </div>
                 </div>
               ))
