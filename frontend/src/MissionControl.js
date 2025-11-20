@@ -38,11 +38,23 @@ function MissionControl({ onNavigateHome, missionData }) {
   const [missionCompleted, setMissionCompleted] = useState(false);
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const wsRef = useRef(null);
+  // Scale from planner coordinate units to simulator meters (default 1 if missing)
+  const metersPerCoord = useRef(1.0);
 
   // Load mission data if provided
   useEffect(() => {
     if (missionData) {
       logger.info('Loading mission data:', missionData);
+      // Capture meters-per-coord from planner payload if provided
+      if (typeof missionData.meters_per_coord === 'number' && isFinite(missionData.meters_per_coord) && missionData.meters_per_coord > 0) {
+        metersPerCoord.current = missionData.meters_per_coord;
+        logger.info(`Using meters_per_coord from planner: ${metersPerCoord.current}`);
+      } else if (typeof missionData.scale_factor === 'number' && isFinite(missionData.scale_factor) && missionData.scale_factor > 0) {
+        metersPerCoord.current = 1.0 / missionData.scale_factor;
+        logger.info(`Derived meters_per_coord from scale_factor: ${metersPerCoord.current}`);
+      } else {
+        logger.warn('No scale provided by planner; assuming meters_per_coord=1.0');
+      }
       
       // Set targets from mission
       if (missionData.targets) {
@@ -75,14 +87,17 @@ function MissionControl({ onNavigateHome, missionData }) {
   const initializeDronesAtOrigin = async (origin) => {
     try {
       // Small formation radius around origin (10 meters)
-      const formationRadius = 10;
+      const formationRadius = 10; // meters
+      const scale = metersPerCoord.current;
+      const centerX = origin.x * scale;
+      const centerY = origin.y * scale;
       
       const response = await fetch('http://localhost:3001/api/reset-positions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          centerX: origin.x,
-          centerY: origin.y,
+          centerX,
+          centerY,
           radius: formationRadius
         })
       });
@@ -528,21 +543,37 @@ function MissionControl({ onNavigateHome, missionData }) {
 
       // Step 3: Move into hexagonal formation around first waypoint
       const formationRadius = 30; // meters
+      const scale = metersPerCoord.current;
       addLog(`Step 3: Moving into formation (${formationRadius}m radius)...`);
       
       const firstWaypoint = waypointsPath[0];
       let centerX, centerY;
       
       if (firstWaypoint.x !== undefined && firstWaypoint.y !== undefined) {
-        centerX = firstWaypoint.x;
-        centerY = firstWaypoint.y;
+        centerX = firstWaypoint.x * scale;
+        centerY = firstWaypoint.y * scale;
       } else if (firstWaypoint.lat !== undefined && firstWaypoint.lng !== undefined) {
         const coords = mapToSimulatorCoords(firstWaypoint.lng, firstWaypoint.lat);
         centerX = coords.x;
         centerY = coords.y;
       }
 
-      const formationPositions = getHexagonalFormation(centerX, centerY, formationAltitude, formationRadius);
+      // Adjust formation radius if near any jammer so drones don't cross jammer boundary
+      let effectiveRadius = formationRadius;
+      if (Array.isArray(missionJammers) && missionJammers.length > 0) {
+        for (const j of missionJammers) {
+          const jx = (typeof j.x === 'number') ? j.x * scale : mapToSimulatorCoords(j.lng, j.lat).x;
+          const jy = (typeof j.y === 'number') ? j.y * scale : mapToSimulatorCoords(j.lng, j.lat).y;
+          const jr = Number(j.radius) || 0; // meters
+          const dx = centerX - jx;
+          const dy = centerY - jy;
+          const d = Math.hypot(dx, dy);
+          if (d <= jr + effectiveRadius) {
+            effectiveRadius = Math.max(0, Math.min(effectiveRadius, d - jr));
+          }
+        }
+      }
+      const formationPositions = getHexagonalFormation(centerX, centerY, formationAltitude, effectiveRadius);
       
       for (let i = 0; i < allUavIds.length; i++) {
         const uavId = allUavIds[i];
@@ -566,8 +597,8 @@ function MissionControl({ onNavigateHome, missionData }) {
         
         let wpCenterX, wpCenterY;
         if (wp.x !== undefined && wp.y !== undefined) {
-          wpCenterX = wp.x;
-          wpCenterY = wp.y;
+          wpCenterX = wp.x * scale;
+          wpCenterY = wp.y * scale;
         } else if (wp.lat !== undefined && wp.lng !== undefined) {
           const coords = mapToSimulatorCoords(wp.lng, wp.lat);
           wpCenterX = coords.x;
@@ -576,8 +607,23 @@ function MissionControl({ onNavigateHome, missionData }) {
 
         addLog(`Moving to waypoint ${wpIndex + 1}/${waypointsPath.length} (altitude: ${altitude.toFixed(1)}m)...`);
         
+        // Calculate dynamic formation radius to stay outside jammer zones
+        let localRadius = formationRadius;
+        if (Array.isArray(missionJammers) && missionJammers.length > 0) {
+          for (const j of missionJammers) {
+            const jx = (typeof j.x === 'number') ? j.x * scale : mapToSimulatorCoords(j.lng, j.lat).x;
+            const jy = (typeof j.y === 'number') ? j.y * scale : mapToSimulatorCoords(j.lng, j.lat).y;
+            const jr = Number(j.radius) || 0; // meters
+            const dx = wpCenterX - jx;
+            const dy = wpCenterY - jy;
+            const d = Math.hypot(dx, dy);
+            if (d <= jr + localRadius) {
+              localRadius = Math.max(0, Math.min(localRadius, d - jr));
+            }
+          }
+        }
         // Calculate new formation positions around this waypoint
-        const newFormation = getHexagonalFormation(wpCenterX, wpCenterY, altitude, formationRadius);
+        const newFormation = getHexagonalFormation(wpCenterX, wpCenterY, altitude, localRadius);
         
         // Send all drones to their formation positions around new center
         for (let i = 0; i < allUavIds.length; i++) {
