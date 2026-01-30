@@ -3,12 +3,36 @@ import websockets
 import json
 import math
 import time
+import os
+import logging
 from datetime import datetime
 
+# Configure logging
+DEBUG = os.getenv('DEBUG', 'false').lower() == 'true'
+logging.basicConfig(
+    level=logging.DEBUG if DEBUG else logging.INFO,
+    format='[%(levelname)s] %(message)s'
+)
+logger = logging.getLogger(__name__)
+
+# Physics constants
+GRAVITY = -9.81  # m/s^2
+MAX_VELOCITY = 33.33  # m/s (120 km/h)
+ACCELERATION = 5.0  # m/s^2
+DRAG_COEFFICIENT = 0.5
+BATTERY_DRAIN_IDLE = 0.01  # % per second
+BATTERY_DRAIN_FLYING = 0.05  # % per second
+UPDATE_RATE = 0.05  # 20 Hz
+
 class UAVSimulator:
-    def __init__(self):
+    def __init__(self, uav_id='UAV-1', initial_position=None):
+        self.uav_id = uav_id
+
         # Position (x, y, z) in meters
-        self.position = {'x': 0.0, 'y': 0.0, 'z': 0.0}
+        if initial_position:
+            self.position = initial_position.copy()
+        else:
+            self.position = {'x': 0.0, 'y': 0.0, 'z': 0.0}
         
         # Velocity (x, y, z) in m/s
         self.velocity = {'x': 0.0, 'y': 0.0, 'z': 0.0}
@@ -29,14 +53,14 @@ class UAVSimulator:
         self.target_position = None
         
         # Physics constants
-        self.gravity = -9.81  # m/s^2
-        self.max_velocity = 10.0  # m/s
-        self.acceleration = 2.0  # m/s^2
-        self.drag_coefficient = 0.5
+        self.gravity = GRAVITY
+        self.max_velocity = MAX_VELOCITY
+        self.acceleration = ACCELERATION
+        self.drag_coefficient = DRAG_COEFFICIENT
         
         # Battery drain rate (% per second)
-        self.battery_drain_idle = 0.01
-        self.battery_drain_flying = 0.05
+        self.battery_drain_idle = BATTERY_DRAIN_IDLE
+        self.battery_drain_flying = BATTERY_DRAIN_FLYING
         
         # Simulation time
         self.last_update = time.time()
@@ -184,7 +208,40 @@ class UAVSimulator:
                 response['message'] = f'Rotating by {yaw_change}°'
             else:
                 response['message'] = 'Cannot rotate (not flying)'
-        
+
+        elif command == 'goto':
+            if self.status == 'flying':
+                x = params.get('x', self.position['x'])
+                y = params.get('y', self.position['y'])
+                z = params.get('z', self.position['z'])
+
+                self.target_position = {
+                    'x': x,
+                    'y': y,
+                    'z': max(0, z)
+                }
+                response['success'] = True
+                response['message'] = f'Going to position ({x}, {y}, {z})'
+            else:
+                response['message'] = 'Cannot goto (not flying)'
+
+        elif command == 'teleport':
+            # Instant teleport to position (no flying required)
+            x = params.get('x', self.position['x'])
+            y = params.get('y', self.position['y'])
+            z = params.get('z', self.position['z'])
+
+            self.position = {
+                'x': x,
+                'y': y,
+                'z': max(0, z)
+            }
+            self.velocity = {'x': 0, 'y': 0, 'z': 0}
+            self.target_position = None
+            
+            response['success'] = True
+            response['message'] = f'Teleported to position ({x}, {y}, {z})'
+
         else:
             response['message'] = f'Unknown command: {command}'
         
@@ -206,24 +263,26 @@ class UAVSimulator:
         }
 
 class SimulatorServer:
-    def __init__(self, host='0.0.0.0', port=8765):
+    def __init__(self, host='0.0.0.0', port=8765, uav_id='UAV-1', initial_position=None):
         self.host = host
         self.port = port
-        self.uav = UAVSimulator()
+        self.uav_id = uav_id
+        self.uav = UAVSimulator(uav_id, initial_position)
         self.websocket = None
         self.running = False
-        
+
     async def connect_to_backend(self):
         """Connect to backend server"""
-        backend_url = 'ws://backend:3001/ws/simulator'
+        import os
+        backend_url = os.getenv('BACKEND_URL', f'ws://backend:3001/ws/simulator?id={self.uav_id}')
         
         while True:
             try:
-                print(f"Connecting to backend at {backend_url}...")
+                logger.info(f"Connecting to backend at {backend_url}...")
                 async with websockets.connect(backend_url) as websocket:
                     self.websocket = websocket
                     self.running = True
-                    print("Connected to backend!")
+                    logger.info("Connected to backend!")
                     
                     # Start physics update loop
                     physics_task = asyncio.create_task(self.physics_loop())
@@ -233,28 +292,28 @@ class SimulatorServer:
                         async for message in websocket:
                             await self.handle_message(message)
                     except websockets.exceptions.ConnectionClosed:
-                        print("Connection closed by backend")
+                        logger.info("Connection closed by backend")
                     finally:
                         self.running = False
                         physics_task.cancel()
                         
             except Exception as e:
-                print(f"Connection error: {e}")
-                print("Retrying in 3 seconds...")
+                logger.error(f"Connection error: {e}")
+                logger.info("Retrying in 3 seconds...")
                 await asyncio.sleep(3)
     
     async def handle_message(self, message):
         """Handle incoming WebSocket messages"""
         try:
             data = json.loads(message)
-            print(f"Received command: {data.get('command')}")
+            logger.debug(f"Received command: {data.get('command')}")
             
             if data.get('type') == 'command':
                 response = self.uav.handle_command(data)
                 await self.send_message(response)
                 
         except json.JSONDecodeError as e:
-            print(f"Error parsing message: {e}")
+            logger.error(f"Error parsing message: {e}")
     
     async def send_message(self, data):
         """Send message to backend"""
@@ -262,11 +321,11 @@ class SimulatorServer:
             try:
                 await self.websocket.send(json.dumps(data))
             except Exception as e:
-                print(f"Error sending message: {e}")
+                logger.error(f"Error sending message: {e}")
     
     async def physics_loop(self):
         """Main physics simulation loop"""
-        print("Physics simulation started")
+        logger.info("Physics simulation started")
         
         while self.running:
             current_time = time.time()
@@ -280,15 +339,39 @@ class SimulatorServer:
             state = self.uav.get_state()
             await self.send_message(state)
             
-            # Update at 20 Hz
-            await asyncio.sleep(0.05)
+            # Update at configured rate
+            await asyncio.sleep(UPDATE_RATE)
     
     async def run(self):
         """Run the simulator server"""
-        print(f"UAV Simulator starting...")
-        print(f"Waiting to connect to backend...")
+        logger.info(f"UAV Simulator starting...")
+        logger.info(f"Waiting to connect to backend...")
         await self.connect_to_backend()
 
 if __name__ == "__main__":
-    simulator = SimulatorServer()
+    import os
+
+    # Get UAV ID and initial position from environment
+    uav_id = os.getenv('UAV_ID', 'UAV-1')
+
+    # Default positions for each HORNET
+    initial_positions = {
+        'HORNET-1': {'x': 0.0, 'y': 0.0, 'z': 0.0},
+        'HORNET-2': {'x': 20.0, 'y': 20.0, 'z': 0.0},
+        'HORNET-3': {'x': 40.0, 'y': 0.0, 'z': 0.0},
+        'HORNET-4': {'x': 20.0, 'y': -20.0, 'z': 0.0},
+        'HORNET-5': {'x': -20.0, 'y': -20.0, 'z': 0.0},
+        'HORNET-6': {'x': -20.0, 'y': 20.0, 'z': 0.0},
+        'HORNET-7': {'x': -100.0, 'y': 100.0, 'z': 0.0},
+        'HORNET-8': {'x': -80.0, 'y': 120.0, 'z': 0.0},
+        'HORNET-9': {'x': -60.0, 'y': 100.0, 'z': 0.0},
+        'HORNET-10': {'x': -80.0, 'y': 80.0, 'z': 0.0},
+        'HORNET-11': {'x': -120.0, 'y': 80.0, 'z': 0.0},
+        'HORNET-12': {'x': -120.0, 'y': 120.0, 'z': 0.0}
+    }
+
+    initial_position = initial_positions.get(uav_id, {'x': 0.0, 'y': 0.0, 'z': 0.0})
+
+    logger.info(f"Starting simulator for {uav_id} at position {initial_position}")
+    simulator = SimulatorServer(uav_id=uav_id, initial_position=initial_position)
     asyncio.run(simulator.run())
